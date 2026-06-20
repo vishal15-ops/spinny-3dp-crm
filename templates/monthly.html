@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% set active = 'monthly' %}
+{% block title %}Monthly{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">Monthly Summary</div>
+  <div class="page-meta">All cities · grouped by month</div>
+</div>
+
+<div class="table-card">
+  <div class="table-card-header">Month × City Breakdown</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Month</th>
+        <th>City</th>
+        <th>Total Prints</th>
+        <th>Completed</th>
+        <th>Failed</th>
+        <th>Success %</th>
+        <th>Machine Hours</th>
+        <th>Material (kg)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(cur_month='') %}
+      {% for r in rows %}
+      {% if r[0] != ns.cur_month %}
+        {% set ns.cur_month = r[0] %}
+        <tr style="background:#f8f9fb">
+          <td colspan="8" style="font-weight:700; font-size:13px; color:#374151; padding:10px 14px;">
+            📅 {{ r[0] }}
+          </td>
+        </tr>
+      {% endif %}
+      <tr>
+        <td class="mono" style="color:#9ca3af">{{ r[0] }}</td>
+        <td>
+          <span class="b-city" style="background:{{ city_color.get(r[1],'#999') }}">{{ r[1] }}</span>
+        </td>
+        <td class="mono"><strong>{{ r[2] }}</strong></td>
+        <td class="mono text-green">{{ r[3] }}</td>
+        <td class="mono text-red">{{ r[2] - r[3] }}</td>
+        <td class="mono">
+          {% set pct = (r[3]/r[2]*100) if r[2] else 0 %}
+          <span style="color:{% if pct>=80 %}#16a34a{% elif pct>=60 %}#ea580c{% else %}#dc2626{% endif %}">
+            {{ "%.0f"|format(pct) }}%
+          </span>
+        </td>
+        <td class="mono">{{ "%.1f"|format(r[4]) }}h</td>
+        <td class="mono">{{ "%.2f"|format(r[5]) }} kg</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
