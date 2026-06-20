@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% set active = 'dash' %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Operations Dashboard</div>
+    <div class="page-meta">Today: {{ today }} &nbsp;|&nbsp; Last sync: {{ last_sync[0] if last_sync else '—' }}</div>
+  </div>
+  <div class="page-meta mono">
+    {{ last_sync[1] if last_sync else 0 }} total records
+  </div>
+</div>
+
+<!-- KPI Cards -->
+<div class="cards-row cards-4">
+  <div class="card">
+    <div class="card-label">Total Prints</div>
+    <div class="card-value">{{ total }}</div>
+    <div class="card-sub">All time, all cities</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Success Rate</div>
+    <div class="card-value text-green">
+      {{ "%.0f"|format(completed/total*100 if total else 0) }}%
+    </div>
+    <div class="card-sub">{{ completed }} completed / {{ failed }} failed</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Machine Hours</div>
+    <div class="card-value">{{ hrs_total }}h</div>
+    <div class="card-sub">Total run time</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Material Used</div>
+    <div class="card-value">{{ mat_total }} kg</div>
+    <div class="card-sub">Across all filament types</div>
+  </div>
+</div>
+
+<!-- Today per City -->
+<div class="section-title">Today — {{ today }}</div>
+<div class="cards-row cards-4">
+  {% for city in cities %}
+  {% set d = cities_today[city] %}
+  <div class="city-card" style="border-top-color: {{ d.color }}">
+    <div class="city-card-name" style="color:{{ d.color }}">
+      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ d.color }};margin-right:6px;vertical-align:middle"></span>
+      {{ city }}
+    </div>
+    <div class="city-stat">{{ d.prints }}</div>
+    <div class="city-detail">parts printed today</div>
+    <div style="margin-top:10px; display:flex; gap:12px;">
+      <div>
+        <div style="font-size:11px;color:#9ca3af">Hours</div>
+        <div style="font-size:15px;font-weight:700">{{ d.hours }}h</div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:#9ca3af">Material</div>
+        <div style="font-size:15px;font-weight:700">{{ d.mat_g }}g</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Recent Prints -->
+<div class="table-card">
+  <div class="table-card-header">
+    Recent Prints
+    <small>Latest 25 across all cities</small>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Part Name</th>
+        <th>City</th>
+        <th>Printer</th>
+        <th>Material</th>
+        <th>Duration</th>
+        <th>Mat. (g)</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in recent %}
+      <tr>
+        <td class="mono">{{ p[0] }}</td>
+        <td class="td-part" title="{{ p[1] }}">{{ p[1] }}</td>
+        <td>
+          <span class="b-city" style="background:{{ city_color.get(p[3],'#999') }}">
+            {{ p[3] }}
+          </span>
+        </td>
+        <td class="mono" style="font-size:11px">{{ p[2] }}</td>
+        <td>{{ p[4] }}</td>
+        <td class="mono">{{ p[5] }}m</td>
+        <td class="mono">{{ p[6] }}g</td>
+        <td>
+          {% if p[7]   == 'Completed' %}<span class="badge b-completed">✓ Completed</span>
+          {% elif p[7] == 'Failed'    %}<span class="badge b-failed">✗ Failed</span>
+          {% elif p[7] == 'Cancelled' %}<span class="badge b-cancelled">Cancelled</span>
+          {% elif p[7] == 'Printing'  %}<span class="badge b-printing">● Printing</span>
+          {% else %}<span class="badge b-queued">{{ p[7] }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
