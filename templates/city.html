@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% set active = city %}
+{% block title %}{{ city }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title" style="color:{{ color }}">
+      <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ color }};margin-right:8px;vertical-align:middle"></span>
+      {{ city }}
+    </div>
+    <div class="page-meta">All print history for {{ city }} lab</div>
+  </div>
+</div>
+
+<!-- Overall Stats -->
+<div class="cards-row cards-4" style="margin-bottom:18px">
+  <div class="card">
+    <div class="card-label">Total Prints</div>
+    <div class="card-value" style="color:{{ color }}">{{ ov[0] }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Completed</div>
+    <div class="card-value text-green">{{ ov[1] }}</div>
+    <div class="card-sub">
+      {{ "%.0f"|format(ov[1]/ov[0]*100 if ov[0] else 0) }}% success rate
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-label">Machine Hours</div>
+    <div class="card-value">{{ "%.1f"|format(ov[3]) }}h</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Material Used</div>
+    <div class="card-value">{{ "%.2f"|format(ov[4]) }} kg</div>
+  </div>
+</div>
+
+<!-- Today -->
+<div class="city-card" style="border-top-color:{{ color }}; margin-bottom:20px;">
+  <div class="city-card-name" style="color:{{ color }}">Today — {{ today }}</div>
+  <div style="display:flex;gap:28px">
+    <div>
+      <div style="font-size:11px;color:#9ca3af">Parts</div>
+      <div style="font-size:22px;font-weight:800">{{ td[0] }}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#9ca3af">Hours</div>
+      <div style="font-size:22px;font-weight:800">{{ "%.1f"|format(td[1]) }}h</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#9ca3af">Material</div>
+      <div style="font-size:22px;font-weight:800">{{ "%.0f"|format(td[2]) }}g</div>
+    </div>
+  </div>
+</div>
+
+<!-- Search -->
+<div style="margin-bottom:12px">
+  <input id="searchInput" type="text" placeholder="Search part name or printer…"
+    oninput="filterTable()"
+    style="width:300px;padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;">
+</div>
+
+<!-- All Prints -->
+<div class="table-card">
+  <div class="table-card-header">
+    All Prints
+    <small id="rowCount">{{ rows|length }} records</small>
+  </div>
+  <table id="mainTable">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Part Name</th>
+        <th>Printer</th>
+        <th>Material</th>
+        <th>Start</th>
+        <th>End</th>
+        <th>Duration</th>
+        <th>Mat. (g)</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="mono">{{ r[0] }}</td>
+        <td class="td-part" title="{{ r[1] }}">{{ r[1] }}</td>
+        <td class="mono" style="font-size:11px">{{ r[2] }}</td>
+        <td>{{ r[3] }}</td>
+        <td class="mono">{{ r[4][11:] if r[4] else '—' }}</td>
+        <td class="mono">{{ r[5][11:] if r[5] else '—' }}</td>
+        <td class="mono">{{ r[6] }}m</td>
+        <td class="mono">{{ r[7] }}g</td>
+        <td>
+          {% if r[8]   == 'Completed' %}<span class="badge b-completed">✓ Completed</span>
+          {% elif r[8] == 'Failed'    %}<span class="badge b-failed">✗ Failed</span>
+          {% elif r[8] == 'Cancelled' %}<span class="badge b-cancelled">Cancelled</span>
+          {% elif r[8] == 'Printing'  %}<span class="badge b-printing">● Printing</span>
+          {% else %}<span class="badge b-queued">{{ r[8] }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+function filterTable() {
+  const q  = document.getElementById('searchInput').value.toLowerCase();
+  const rows = document.querySelectorAll('#mainTable tbody tr');
+  let shown = 0;
+  rows.forEach(row => {
+    const text = row.textContent.toLowerCase();
+    const vis  = !q || text.includes(q);
+    row.style.display = vis ? '' : 'none';
+    if (vis) shown++;
+  });
+  document.getElementById('rowCount').textContent = shown + ' records';
+}
+</script>
+{% endblock %}
