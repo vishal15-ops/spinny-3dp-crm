@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% set active = 'materials' %}
+{% block title %}Materials{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">Material Analysis</div>
+  <div class="page-meta">Filament usage across all cities</div>
+</div>
+
+<!-- Overall by material -->
+<div class="section-title">Overall Totals</div>
+<div class="table-card" style="margin-bottom:22px">
+  <div class="table-card-header">Total Usage per Material Type</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Material</th>
+        <th>Total Parts</th>
+        <th>Total Weight (kg)</th>
+        <th>Share</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set total_kg = top|sum(attribute=2) %}
+      {% for r in top %}
+      <tr>
+        <td><strong>{{ r[0] }}</strong></td>
+        <td class="mono">{{ r[1] }}</td>
+        <td class="mono">{{ "%.3f"|format(r[2]) }} kg</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:{{ [r[2]/total_kg*120,120]|min|int }}px;height:6px;background:#e91e63;border-radius:3px"></div>
+            <span class="mono">{{ "%.0f"|format(r[2]/total_kg*100 if total_kg else 0) }}%</span>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- By city -->
+<div class="section-title">Breakdown by City × Material</div>
+<div class="table-card">
+  <div class="table-card-header">City-wise Material Usage</div>
+  <table>
+    <thead>
+      <tr>
+        <th>City</th>
+        <th>Material</th>
+        <th>Parts</th>
+        <th>Weight (kg)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(cur_city='') %}
+      {% for r in by_city %}
+      {% if r[0] != ns.cur_city %}
+        {% set ns.cur_city = r[0] %}
+        <tr style="background:#f8f9fb">
+          <td colspan="4" style="padding:8px 14px;">
+            <span class="b-city" style="background:{{ city_color.get(r[0],'#999') }}">{{ r[0] }}</span>
+          </td>
+        </tr>
+      {% endif %}
+      <tr>
+        <td style="color:#9ca3af" class="mono">{{ r[0] }}</td>
+        <td><strong>{{ r[1] }}</strong></td>
+        <td class="mono">{{ r[2] }}</td>
+        <td class="mono">{{ "%.3f"|format(r[3]) }} kg</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
