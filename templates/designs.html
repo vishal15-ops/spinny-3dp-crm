@@ -4,9 +4,8 @@ Parts not yet highlighted in Pan India sheet — {{ designs|length }} new design
 Total New Designs
 {{ designs|length }}
 All time
-{% set today_str = designs[0].date_added if designs else '' %}
 Today's Designs
-{{ designs|selectattr("date_added","equalto",today_count_date)|list|length if today_count_date is defined else '—' }}
+{{ today_count }}
 New today
 With City Data
 {{ designs|selectattr("city")|list|length }}
