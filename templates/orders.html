@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% set active = 'orders' %}
+{% block title %}Orders{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">📋 Orders</div>
+    <div class="page-meta">City-wise order tracking — {{ total }} total orders</div>
+  </div>
+</div>
+
+<!-- City Stats -->
+<div class="cards-row cards-4" style="margin-bottom:20px">
+  {% for city in cities %}
+  {% set s = city_stats[city] %}
+  <div class="city-card" style="border-top-color:{{ s.color }}">
+    <div class="city-card-name" style="color:{{ s.color }}">
+      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ s.color }};margin-right:6px;vertical-align:middle"></span>{{ city }}
+    </div>
+    <div style="font-size:24px;font-weight:800">{{ s.total }}</div>
+    <div style="font-size:12px;color:#9ca3af;margin-top:4px">total orders</div>
+    <div style="margin-top:8px;display:flex;gap:12px;font-size:12px">
+      <span class="badge b-fulfilled">✓ {{ s.fulfilled }}</span>
+      <span class="badge b-pending">⏳ {{ s.pending }}</span>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Filters -->
+<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+  <input class="search-input" id="searchInput" type="text" placeholder="Search part, car no, POC…" oninput="filterTable()">
+  <select class="filter-select" onchange="location.href='/orders?city='+this.value+'&status={{ status_filter }}'">
+    <option {% if city_filter=='All' %}selected{% endif %} value="All">All Cities</option>
+    {% for c in cities %}
+    <option value="{{ c }}" {% if city_filter==c %}selected{% endif %}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  <select class="filter-select" onchange="location.href='/orders?city={{ city_filter }}&status='+this.value">
+    <option value="All" {% if status_filter=='All' %}selected{% endif %}>All Status</option>
+    {% for s in statuses %}
+    <option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <span id="rowCount" style="font-size:12px;color:#9ca3af">{{ orders|length }} records</span>
+</div>
+
+<!-- Table -->
+<div class="table-card">
+  <div class="table-card-header">
+    Order List
+    {% if city_filter != 'All' %}
+    <small>Filtered: {{ city_filter }}</small>
+    {% endif %}
+  </div>
+  {% if not orders %}
+  <div style="padding:40px;text-align:center;color:#9ca3af">
+    <div style="font-size:32px">📋</div>
+    <div style="margin-top:8px">No orders found. Set up Google Sheets API to see orders.</div>
+  </div>
+  {% else %}
+  <table id="ordersTable">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Part Name</th>
+        <th>Car No.</th>
+        <th>Source City</th>
+        <th>Order City</th>
+        <th>POC</th>
+        <th>Status</th>
+        <th>Design</th>
+        <th>Remarks</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td class="mono">{{ o.date }}</td>
+        <td class="td-part" title="{{ o.part_name }}">{{ o.part_name }}</td>
+        <td class="mono" style="font-size:11px">{{ o.car_no }}</td>
+        <td><span class="b-city" style="background:{{ city_color.get(o.source_city,'#90A4AE') }}">{{ o.source_city }}</span></td>
+        <td><span class="b-city" style="background:{{ city_color.get(o.order_city,'#90A4AE') }}">{{ o.order_city }}</span></td>
+        <td style="font-size:12px">{{ o.poc }}</td>
+        <td>
+          {% if 'fulfilled' in o.status.lower() %}<span class="badge b-fulfilled">✓ {{ o.status }}</span>
+          {% elif 'ship' in o.status.lower() %}<span class="badge b-printing">🚚 {{ o.status }}</span>
+          {% elif o.status %}<span class="badge b-pending">⏳ {{ o.status }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if 'new' in o.design_type.lower() %}<span class="badge" style="background:#e3f2fd;color:#1565c0">✨ New</span>
+          {% elif o.design_type %}<span class="badge b-cancelled">{{ o.design_type }}</span>
+          {% endif %}
+        </td>
+        <td style="font-size:12px;color:#6b7280">{{ o.remarks[:40] if o.remarks else '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<script>
+function filterTable(){
+  const q=document.getElementById('searchInput').value.toLowerCase();
+  const rows=document.querySelectorAll('#ordersTable tbody tr');
+  let n=0;
+  rows.forEach(r=>{const v=!q||r.textContent.toLowerCase().includes(q);r.style.display=v?'':'none';if(v)n++;});
+  document.getElementById('rowCount').textContent=n+' records';
+}
+</script>
+{% endblock %}
