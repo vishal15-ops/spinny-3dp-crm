@@ -1,65 +1,23 @@
-{% extends "base.html" %}
-{% set active = 'designs' %}
-{% block title %}New Designs{% endblock %}
-{% block content %}
-<div class="page-header">
-  <div>
-    <div class="page-title">✨ New Designs</div>
-    <div class="page-meta">Parts not yet highlighted in Pan India sheet — {{ designs|length }} new designs</div>
-  </div>
-</div>
-
-<!-- Search -->
-<div style="margin-bottom:14px">
-  <input class="search-input" id="searchInput" type="text" placeholder="Search part or vehicle…" oninput="filterTable()">
-  <span id="rowCount" style="font-size:12px;color:#9ca3af;margin-left:12px">{{ designs|length }} parts</span>
-</div>
-
-<div class="table-card">
-  <div class="table-card-header">
-    New Design Parts
-    <small>Unhighlighted rows from Pan India Printing sheet</small>
-  </div>
-  {% if not designs %}
-  <div style="padding:40px;text-align:center;color:#9ca3af">
-    <div style="font-size:32px">✨</div>
-    <div style="margin-top:8px">No new designs found. Set up Google Sheets API to see new designs.</div>
-  </div>
-  {% else %}
-  <table id="designTable">
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Part Name</th>
-        <th>Qty</th>
-        <th>File Name</th>
-        <th>Design Count</th>
-        <th>Vehicle</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for d in designs %}
-      <tr>
-        <td class="mono" style="color:#9ca3af">{{ loop.index }}</td>
-        <td><strong>{{ d.part_name }}</strong></td>
-        <td class="mono">{{ d.qty }}</td>
-        <td style="font-size:12px;color:#6b7280">{{ d.file_name }}</td>
-        <td class="mono">{{ d.design_count }}</td>
-        <td style="font-size:12px">{{ d.vehicle }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
-</div>
-
-<script>
-function filterTable(){
-  const q=document.getElementById('searchInput').value.toLowerCase();
-  const rows=document.querySelectorAll('#designTable tbody tr');
-  let n=0;
-  rows.forEach(r=>{const v=!q||r.textContent.toLowerCase().includes(q);r.style.display=v?'':'none';if(v)n++;});
-  document.getElementById('rowCount').textContent=n+' parts';
-}
-</script>
+{% extends "base.html" %} {% set active = 'designs' %} {% block title %}New Designs{% endblock %} {% block content %}
+✨ New Designs
+Parts not yet highlighted in Pan India sheet — {{ designs|length }} new designs
+Total New Designs
+{{ designs|length }}
+All time
+{% set today_str = designs[0].date_added if designs else '' %}
+Today's Designs
+{{ designs|selectattr("date_added","equalto",today_count_date)|list|length if today_count_date is defined else '—' }}
+New today
+With City Data
+{{ designs|selectattr("city")|list|length }}
+City tagged
+Total Qty
+{{ designs|sum(attribute='qty')|int }}
+Parts total
+Search part or vehicle...
+ {{ designs|length }} parts
+New Design Parts Unhighlighted in Pan India sheet
+{% for d in designs %} {% endfor %}
+#	Part Name	Qty	Design Date	Printed Date	City	Material	Print Time	File Name	Vehicle	Printed By
+{{ loop.index }}	{{ d.part_name }}	{{ d.qty }}	{% if d.design_date %}{{ d.design_date }}{% else %}—{% endif %}	{% if d.printed_date %}{{ d.printed_date }}{% else %}—{% endif %}	{% if d.city %} {{ d.city }} {% else %}—{% endif %}	{{ d.material or '—' }}	{{ d.print_time or '—' }}	{{ d.file_name or '—' }}	{{ d.vehicle or '—' }}	{{ d.printed_by or '—' }}
 {% endblock %}
