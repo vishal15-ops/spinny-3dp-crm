@@ -1,3 +1,4 @@
+
 """
 Spinny 3DP CRM — Cloud Edition v2 Final + Auto-Fix
 Multi-city Bambu Lab print tracker + Orders + New Designs
@@ -301,6 +302,8 @@ def dashboard():
  
     sheets = _sheets
     orders = sheets.get("orders", [])
+    designs = sheets.get("designs", [])
+ 
     ord_city = {}
     for c in CITIES:
         co = [o for o in orders if o.get("order_city") == c]
@@ -310,6 +313,13 @@ def dashboard():
             "pending":   len([o for o in co if o.get("status","").lower() not in ["fulfilled","cancelled",""]])
         }
  
+    # Today's new designs
+    today_designs = [d for d in designs if d.get("design_date","") == today]
+ 
+    # This month designs
+    month = today[:7]
+    month_designs = [d for d in designs if str(d.get("design_date","")).startswith(month)]
+ 
     db.close()
     return render_template('dashboard.html',
         total=total, completed=completed, failed=failed,
@@ -317,7 +327,9 @@ def dashboard():
         cities_today=cities_today, today_total=today_total,
         recent=recent, last_sync=last_sync, today=today,
         city_color=CITY_COLOR, cities=CITIES,
-        ord_city=ord_city, total_orders=len(orders))
+        ord_city=ord_city, total_orders=len(orders),
+        today_designs=today_designs, month_designs=month_designs,
+        total_designs=len(designs))
  
  
 @app.route('/city/<city>')
@@ -454,4 +466,3 @@ threading.Thread(target=auto_sync_loop, daemon=True).start()
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
- 
