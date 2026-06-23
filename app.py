@@ -1,4 +1,3 @@
-
 """
 Spinny 3DP CRM — Cloud Edition v2 Final + Auto-Fix
 Multi-city Bambu Lab print tracker + Orders + New Designs
@@ -229,6 +228,9 @@ def do_sync():
             # Convert UTC → IST (+5:30)
             st_ist = st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
             et_ist = et.replace(tzinfo=timezone.utc).astimezone(IST) if et else None
+            # Fix: agar start==end aur duration>0 → end = start + duration
+            if st_ist and et_ist and st_ist == et_ist and dur > 0:
+                et_ist = st_ist + timedelta(minutes=dur)
             db.execute("""INSERT OR IGNORE INTO prints
                 (task_id,date,part_name,printer,city,material,start_time,end_time,duration_min,material_g,status)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
@@ -242,7 +244,7 @@ def do_sync():
             new_count += 1
     total = db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
     db.execute("INSERT INTO sync_log (synced_at,total_records,new_records,note) VALUES (?,?,?,?)",
-               (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), total, new_count, "OK"))
+               (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"), total, new_count, "OK"))
     db.commit()
     db.close()
     print(f"[SYNC] Done +{new_count} | total {total}")
