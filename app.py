@@ -295,27 +295,6 @@ def dashboard():
         FROM prints WHERE date != '' ORDER BY date DESC, start_time DESC LIMIT 25""").fetchall()
     last_sync = db.execute("SELECT synced_at,total_records FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
  
-    # MTD stats per city
-    month = today[:7]
-    mtd = {}
-    for c in CITIES:
-        mr = db.execute("""SELECT COUNT(*),
-            COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(duration_min),0)/60.0
-            FROM prints WHERE city=? AND substr(date,1,7)=?""", (c, month)).fetchone()
-        total_c = mr[0] or 1
-        mtd[c] = {
-            "prints": mr[0], "ok": mr[1], "failed": mr[2],
-            "hours": round(mr[3],1),
-            "rate": int(mr[1]/total_c*100) if total_c > 0 else 0
-        }
- 
-    # Top 10 most printed parts
-    top_parts = db.execute("""SELECT part_name, COUNT(*) as cnt, city,
-        SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END)
-        FROM prints GROUP BY part_name ORDER BY cnt DESC LIMIT 10""").fetchall()
- 
     sheets = _sheets
     orders = sheets.get("orders", [])
     ord_city = {}
@@ -334,8 +313,7 @@ def dashboard():
         cities_today=cities_today, today_total=today_total,
         recent=recent, last_sync=last_sync, today=today,
         city_color=CITY_COLOR, cities=CITIES,
-        ord_city=ord_city, total_orders=len(orders),
-        mtd=mtd, top_parts=top_parts)
+        ord_city=ord_city, total_orders=len(orders))
  
  
 @app.route('/city/<city>')
