@@ -147,7 +147,30 @@ def startup_fixes():
         ).rowcount
  
         db.commit()
-        print(f"[AUTO-FIX] Status: +{r1} | Blr: +{r2} | Unknown: +{r3} | Hyd→Blr: +{r4} | Duration fix: +{r5} | EndTime fix: +{r6}")
+ 
+        # Fix 9: start==end but duration>0 → calculate real end_time
+        bad = db.execute("SELECT id,start_time,duration_min FROM prints WHERE start_time=end_time AND duration_min>0 AND start_time!=''").fetchall()
+        r9 = 0
+        for rec in bad:
+            try:
+                from datetime import datetime as _dt, timedelta as _td
+                st_dt = _dt.strptime(rec[1], "%Y-%m-%d %H:%M")
+                et_dt = st_dt + _td(minutes=rec[2])
+                db.execute("UPDATE prints SET end_time=? WHERE id=?", (et_dt.strftime("%Y-%m-%d %H:%M"), rec[0]))
+                r9 += 1
+            except: pass
+        # Fix 9: start==end but duration>0 → calculate real end_time
+        bad = db.execute("SELECT id,start_time,duration_min FROM prints WHERE start_time=end_time AND duration_min>0 AND start_time!=''").fetchall()
+        r9 = 0
+        for rec in bad:
+            try:
+                st_dt = datetime.strptime(rec[1], "%Y-%m-%d %H:%M")
+                et_dt = st_dt + timedelta(minutes=rec[2])
+                db.execute("UPDATE prints SET end_time=? WHERE id=?", (et_dt.strftime("%Y-%m-%d %H:%M"), rec[0]))
+                r9 += 1
+            except: pass
+        db.commit()
+        print(f"[AUTO-FIX] Status:{r1} Blr:{r2} Dur:{r5} EndTime:{r6} TimeFixed:{r9}")
     except Exception as e:
         print(f"[AUTO-FIX ERROR] {e}")
     finally:
