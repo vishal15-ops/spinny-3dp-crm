@@ -5,7 +5,8 @@ Multi-city Bambu Lab print tracker + Orders + New Designs
 """
  
 import os, sqlite3, threading, time, json
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
+IST = timezone(timedelta(hours=5, minutes=30))
 from flask import Flask, render_template, jsonify, redirect, request
 import requests
  
@@ -224,14 +225,17 @@ def do_sync():
             # Bambu API bug fix: agar endTime set hai → print complete ho gaya
             if et and status == "Printing":
                 status = "Completed"
+            # Convert UTC → IST (+5:30)
+            st_ist = st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
+            et_ist = et.replace(tzinfo=timezone.utc).astimezone(IST) if et else None
             db.execute("""INSERT OR IGNORE INTO prints
                 (task_id,date,part_name,printer,city,material,start_time,end_time,duration_min,material_g,status)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (tid,
-                 st.strftime("%Y-%m-%d") if st else "",
+                 st_ist.strftime("%Y-%m-%d") if st_ist else "",
                  t.get("title","Unknown"), printer, city, get_material(t),
-                 st.strftime("%Y-%m-%d %H:%M") if st else "",
-                 et.strftime("%Y-%m-%d %H:%M") if et else "",
+                 st_ist.strftime("%Y-%m-%d %H:%M") if st_ist else "",
+                 et_ist.strftime("%Y-%m-%d %H:%M") if et_ist else "",
                  dur, round(float(t.get("weight") or 0),2), status))
             existing.add(tid)
             new_count += 1
@@ -450,3 +454,4 @@ threading.Thread(target=auto_sync_loop, daemon=True).start()
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+ 
