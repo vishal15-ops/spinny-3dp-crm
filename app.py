@@ -291,8 +291,8 @@ def dashboard():
             (today,)).fetchone()[0]
     }
  
-    recent = db.execute("""SELECT date,part_name,printer,city,material,duration_min,material_g,status
-        FROM prints ORDER BY date DESC, start_time DESC LIMIT 25""").fetchall()
+    recent = db.execute("""SELECT date,part_name,printer,city,material,duration_min,material_g,status,start_time,end_time
+        FROM prints WHERE date != '' ORDER BY date DESC, start_time DESC LIMIT 25""").fetchall()
     last_sync = db.execute("SELECT synced_at,total_records FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
  
     # MTD stats per city
