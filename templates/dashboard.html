@@ -10,7 +10,7 @@
   <div class="page-meta mono">{{ last_sync[1] if last_sync else 0 }} total records</div>
 </div>
 
-<!-- KPIs -->
+<!-- Overall KPIs -->
 <div class="cards-row cards-4">
   <div class="card">
     <div class="card-label">Total Prints</div>
@@ -25,7 +25,7 @@
   <div class="card">
     <div class="card-label">Machine Hours</div>
     <div class="card-value">{{ hrs_total }}h</div>
-    <div class="card-sub">Total run time</div>
+    <div class="card-sub">Total all time</div>
   </div>
   <div class="card">
     <div class="card-label">Total Orders</div>
@@ -34,8 +34,37 @@
   </div>
 </div>
 
-<!-- Today Prints -->
-<div class="section-title">Today — {{ today }} (Prints)</div>
+<!-- TODAY TOTAL (All Cities Combined) -->
+<div class="section-title">Today — {{ today }}</div>
+<div class="card" style="margin-bottom:16px; border-left:4px solid #e91e63">
+  <div style="display:flex; align-items:center; gap:6px; margin-bottom:14px">
+    <span style="font-size:13px;font-weight:700;color:#e91e63">📊 ALL CITIES COMBINED</span>
+  </div>
+  <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:16px">
+    <div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Total Parts</div>
+      <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.prints }}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Completed</div>
+      <div style="font-size:28px;font-weight:800;margin-top:4px;color:#16a34a">{{ today_total.ok }}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Failed</div>
+      <div style="font-size:28px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.failed }}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Machine Hours</div>
+      <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.hours }}h</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Material Used</div>
+      <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.mat_g }}g</div>
+    </div>
+  </div>
+</div>
+
+<!-- TODAY PER CITY -->
 <div class="cards-row cards-4">
   {% for city in cities %}
   {% set d = cities_today[city] %}
@@ -43,17 +72,29 @@
     <div class="city-card-name" style="color:{{ d.color }}">
       <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ d.color }};margin-right:6px;vertical-align:middle"></span>{{ city }}
     </div>
-    <div style="font-size:22px;font-weight:800">{{ d.prints }}</div>
-    <div style="font-size:12px;color:#9ca3af">parts printed</div>
-    <div style="margin-top:8px;display:flex;gap:12px;font-size:12px">
-      <div><span style="color:#9ca3af">⏱</span> {{ d.hours }}h</div>
-      <div><span style="color:#9ca3af">🧵</span> {{ d.mat_g }}g</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+      <div>
+        <div style="font-size:10px;color:#9ca3af">Parts</div>
+        <div style="font-size:20px;font-weight:800">{{ d.prints }}</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:#9ca3af">Done</div>
+        <div style="font-size:20px;font-weight:800;color:#16a34a">{{ d.ok }}</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:#9ca3af">Hours</div>
+        <div style="font-size:16px;font-weight:700">{{ d.hours }}h</div>
+      </div>
+      <div>
+        <div style="font-size:10px;color:#9ca3af">Material</div>
+        <div style="font-size:16px;font-weight:700">{{ d.mat_g }}g</div>
+      </div>
     </div>
   </div>
   {% endfor %}
 </div>
 
-<!-- Orders by City -->
+<!-- ORDERS BY CITY -->
 <div class="section-title">Orders by City</div>
 <div class="cards-row cards-4">
   {% for city in cities %}
@@ -63,7 +104,7 @@
     <div class="city-card-name" style="color:{{ city_color[city] }}">
       <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ city_color[city] }};margin-right:6px;vertical-align:middle"></span>{{ city }}
     </div>
-    <div style="font-size:22px;font-weight:800">{{ o.total }}</div>
+    <div style="font-size:22px;font-weight:800;margin-top:6px">{{ o.total }}</div>
     <div style="font-size:12px;color:#9ca3af">orders</div>
     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
       <span class="badge b-fulfilled">✓ {{ o.fulfilled }}</span>
@@ -74,7 +115,7 @@
   {% endfor %}
 </div>
 
-<!-- Recent Prints -->
+<!-- RECENT PRINTS -->
 <div class="table-card">
   <div class="table-card-header">
     Recent Prints
