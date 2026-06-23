@@ -4,19 +4,19 @@ Parts not yet highlighted in Pan India sheet — {{ designs|length }} new design
 Total New Designs
 {{ designs|length }}
 All time
-Today's Designs
+Today's New Designs
 {{ today_count }}
-New today
+Added today
 With City Data
-{{ designs|selectattr("city")|list|length }}
+{% set city_count = namespace(n=0) %} {% for d in designs %}{% if d.city %}{% set city_count.n = city_count.n + 1 %}{% endif %}{% endfor %} {{ city_count.n }}
 City tagged
 Total Qty
-{{ designs|sum(attribute='qty')|int }}
+{% set total_qty = namespace(n=0) %} {% for d in designs %}{% set total_qty.n = total_qty.n + d.qty %}{% endfor %} {{ total_qty.n }}
 Parts total
 Search part or vehicle...
  {{ designs|length }} parts
 New Design Parts Unhighlighted in Pan India sheet
 {% for d in designs %} {% endfor %}
-#	Part Name	Qty	Design Date	Printed Date	City	Material	Print Time	File Name	Vehicle	Printed By
-{{ loop.index }}	{{ d.part_name }}	{{ d.qty }}	{% if d.design_date %}{{ d.design_date }}{% else %}—{% endif %}	{% if d.printed_date %}{{ d.printed_date }}{% else %}—{% endif %}	{% if d.city %} {{ d.city }} {% else %}—{% endif %}	{{ d.material or '—' }}	{{ d.print_time or '—' }}	{{ d.file_name or '—' }}	{{ d.vehicle or '—' }}	{{ d.printed_by or '—' }}
+#	Part Name	Qty	Design Date	Printed Date	City	Material	Print Time	Vehicle	Printed By	File Name
+{{ loop.index }}	{{ d.part_name }}	{{ d.qty }}	{% if d.design_date %}{{ d.design_date }}{% else %}—{% endif %}	{% if d.printed_date %}{{ d.printed_date }}{% else %}—{% endif %}	{% if d.city %} {{ d.city }} {% else %}—{% endif %}	{{ d.material or '—' }}	{{ d.print_time or '—' }}	{{ d.vehicle or '—' }}	{{ d.printed_by or '—' }}	{{ d.file_name or '—' }}
 {% endblock %}
