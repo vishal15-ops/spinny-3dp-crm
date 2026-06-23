@@ -27,7 +27,7 @@ Machine Hours
 Material Used
 {{ today_total.mat_g }}g
 New Designs
-{{ today_designs|length }}
+{{ (today_designs|length) if today_designs is defined else 0 }}
 {% for city in cities %} {% set d = cities_today[city] %}
 {{ city }}
 Parts
@@ -39,21 +39,21 @@ Hours
 Material
 {{ d.mat_g }}g
 {% endfor %}
-✨ New Designs — This Month ({{ today[:7] }})
+✨ New Designs — This Month ({{ today[:7] if today is defined else '' }})
 This Month
-{{ month_designs|length }}
+{{ (month_designs|length) if month_designs is defined else 0 }}
 new designs
 Today
-{{ today_designs|length }}
+{{ (today_designs|length) if today_designs is defined else 0 }}
 new today
-View all {{ total_designs }} designs →
-{% if today_designs %}
+View all {{ total_designs if total_designs is defined else 0 }} designs →
+{% if today_designs is defined and today_designs %}
 Today's New Designs
-{% for d in today_designs[:5] %}
+{% for d in (today_designs[:5] if today_designs is defined else []) %}
 {{ d.part_name }}
 {{ d.city or '—' }} | {{ d.material or 'ABS' }}
-{% endfor %} {% if today_designs|length > 5 %}
-+{{ today_designs|length - 5 }} more
+{% endfor %} {% if today_designs is defined and today_designs|length > 5 %}
++{{ (today_designs|length - 5) if today_designs is defined else 0 }} more
 {% endif %}
 {% else %}
 📋
