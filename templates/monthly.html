@@ -1,58 +1,79 @@
 {% extends "base.html" %}
 {% set active = 'monthly' %}
-{% block title %}Monthly{% endblock %}
-
+{% block title %}Monthly Report{% endblock %}
 {% block content %}
 <div class="page-header">
-  <div class="page-title">Monthly Summary</div>
-  <div class="page-meta">All cities · grouped by month</div>
+  <div>
+    <div class="page-title">📅 Monthly Report</div>
+    <div class="page-meta">Parts · Hours · Material · Failures — All Cities</div>
+  </div>
 </div>
 
-<div class="table-card">
-  <div class="table-card-header">Month × City Breakdown</div>
-  <table>
-    <thead>
-      <tr>
-        <th>Month</th>
-        <th>City</th>
-        <th>Total Prints</th>
-        <th>Completed</th>
-        <th>Failed</th>
-        <th>Success %</th>
-        <th>Machine Hours</th>
-        <th>Material (kg)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% set ns = namespace(cur_month='') %}
-      {% for r in rows %}
-      {% if r[0] != ns.cur_month %}
-        {% set ns.cur_month = r[0] %}
-        <tr style="background:#f8f9fb">
-          <td colspan="8" style="font-weight:700; font-size:13px; color:#374151; padding:10px 14px;">
-            📅 {{ r[0] }}
-          </td>
-        </tr>
-      {% endif %}
-      <tr>
-        <td class="mono" style="color:#9ca3af">{{ r[0] }}</td>
-        <td>
-          <span class="b-city" style="background:{{ city_color.get(r[1],'#999') }}">{{ r[1] }}</span>
-        </td>
-        <td class="mono"><strong>{{ r[2] }}</strong></td>
-        <td class="mono text-green">{{ r[3] }}</td>
-        <td class="mono text-red">{{ r[2] - r[3] }}</td>
-        <td class="mono">
-          {% set pct = (r[3]/r[2]*100) if r[2] else 0 %}
-          <span style="color:{% if pct>=80 %}#16a34a{% elif pct>=60 %}#ea580c{% else %}#dc2626{% endif %}">
-            {{ "%.0f"|format(pct) }}%
-          </span>
-        </td>
-        <td class="mono">{{ "%.1f"|format(r[4]) }}h</td>
-        <td class="mono">{{ "%.2f"|format(r[5]) }} kg</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+{% for row in months_list %}
+{% set mo = row[0] %}
+{% set cd = row[1] %}
+{% set total_p = row[2] %}
+{% set total_done = row[3] %}
+{% set total_fail = row[4] %}
+{% set total_h = row[5] %}
+{% set total_mat = row[6] %}
+
+<div style="margin-bottom:28px">
+  <!-- Month Header -->
+  <div style="background:#1e293b;color:#fff;padding:12px 20px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-size:16px;font-weight:700">📅 {{ mo }}</span>
+    <span style="font-size:13px;color:#94a3b8">
+      Total: {{ total_p }} parts &nbsp;·&nbsp; 
+      <span style="color:#4ade80">✓ {{ total_done }}</span> &nbsp;·&nbsp;
+      <span style="color:#f87171">✗ {{ total_fail }}</span> &nbsp;·&nbsp;
+      ⏱ {{ total_h }}h &nbsp;·&nbsp;
+      🧵 {{ total_mat }}kg
+    </span>
+  </div>
+
+  <!-- City Cards -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1.5px solid #e2e8f0;border-top:none;border-radius:0 0 10px 10px;overflow:hidden">
+    {% for city in ['Pune','Bangalore','Hyderabad','Delhi'] %}
+    {% set c = cd[city] %}
+    <div style="padding:16px;border-right:1px solid #e2e8f0{% if loop.last %};border-right:none{% endif %}">
+      <!-- City Name -->
+      <div style="font-size:13px;font-weight:700;color:{{ city_color[city] }};margin-bottom:12px">
+        <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ city_color[city] }};margin-right:6px;vertical-align:middle"></span>{{ city }}
+      </div>
+      <!-- Stats Grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Parts</div>
+          <div style="font-size:22px;font-weight:800;color:#1e293b">{{ c.total }}</div>
+        </div>
+        <div style="background:#f0fdf4;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Success</div>
+          <div style="font-size:22px;font-weight:800;color:#16a34a">{{ "%.0f"|format(c.done/c.total*100 if c.total else 0) }}%</div>
+        </div>
+        <div style="background:#fff7ed;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Failed</div>
+          <div style="font-size:22px;font-weight:800;color:{% if c.failed > 0 %}#dc2626{% else %}#94a3b8{% endif %}">{{ c.failed }}</div>
+        </div>
+        <div style="background:#eff6ff;border-radius:8px;padding:10px;text-align:center">
+          <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Hours</div>
+          <div style="font-size:22px;font-weight:800;color:#1d4ed8">{{ c.hours }}h</div>
+        </div>
+      </div>
+      <!-- Material Bar -->
+      <div style="margin-top:10px">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-bottom:4px">
+          <span>🧵 Material</span>
+          <span style="font-weight:700;color:#374151">{{ c.mat_kg }}kg</span>
+        </div>
+        <div style="background:#f1f5f9;border-radius:4px;height:6px">
+          {% if total_mat > 0 %}
+          <div style="background:{{ city_color[city] }};height:6px;border-radius:4px;width:{{ [c.mat_kg/total_mat*100,100]|min }}%"></div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
 </div>
+{% endfor %}
 {% endblock %}
