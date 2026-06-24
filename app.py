@@ -383,35 +383,26 @@ def dashboard():
     recent = db.execute("""SELECT date,part_name,printer,city,material,duration_min,material_g,status,start_time,end_time
         FROM prints WHERE date != '' ORDER BY date DESC, start_time DESC LIMIT 25""").fetchall()
  
-    # Daily summary - last 30 days per city
-    daily_rows = db.execute("""
-        SELECT date, city,
-            COUNT(*) as parts,
-            SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END) as done,
-            SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END) as failed,
-            ROUND(SUM(duration_min)/60.0, 1) as hours,
-            ROUND(SUM(material_g), 0) as mat_g
-        FROM prints WHERE date != ''
-        GROUP BY date, city
-        ORDER BY date DESC, city
-    """).fetchall()
-    
-    # Organize by date
-    from collections import defaultdict
-    daily_summary = defaultdict(lambda: {c: {"parts":0,"done":0,"failed":0,"hours":0,"mat_g":0} for c in ["Pune","Bangalore","Hyderabad","Delhi"]})
-    for r in daily_rows:
-        if r[1] in ["Pune","Bangalore","Hyderabad","Delhi"]:
-            daily_summary[r[0]][r[1]] = {"parts":r[2],"done":r[3],"failed":r[4],"hours":r[5],"mat_g":r[6]}
-    
-    # Get sorted dates (last 30) with pre-calculated totals
-    all_dates = sorted(daily_summary.keys(), reverse=True)[:30]
+    # Daily summary - simple robust version
+    dates = db.execute("SELECT DISTINCT date FROM prints WHERE date != '' ORDER BY date DESC LIMIT 30").fetchall()
     daily_data = []
-    for d in all_dates:
-        cd = daily_summary[d]
-        total_p = sum(v["parts"] for v in cd.values())
-        total_h = round(sum(v["hours"] for v in cd.values()), 1)
-        total_m = int(sum(v["mat_g"] for v in cd.values()))
-        daily_data.append((d, cd, total_p, total_h, total_m))
+    for row in dates:
+        d = row[0]
+        city_row = {}
+        total_p = 0
+        total_h = 0.0
+        total_m = 0
+        for city_name in CITIES:
+            r = db.execute("""SELECT COUNT(*), COALESCE(ROUND(SUM(duration_min)/60.0,1),0), COALESCE(ROUND(SUM(material_g),0),0)
+                FROM prints WHERE date=? AND city=?""", (d, city_name)).fetchone()
+            parts = r[0] or 0
+            hours = float(r[1] or 0)
+            mat = int(r[2] or 0)
+            city_row[city_name] = {"parts": parts, "hours": hours, "mat_g": mat}
+            total_p += parts
+            total_h += hours
+            total_m += mat
+        daily_data.append((d, city_row, total_p, round(total_h,1), total_m))
     last_sync = db.execute("SELECT synced_at,total_records FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
  
     sheets = _sheets
@@ -443,7 +434,7 @@ def dashboard():
         city_color=CITY_COLOR, cities=CITIES,
         ord_city=ord_city, total_orders=len(orders),
         today_designs=today_designs, month_designs=month_designs,
-        total_designs=len(designs))
+        total_designs=len(designs), daily_data=daily_data)
  
  
 @app.route('/city/<city>')
