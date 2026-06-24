@@ -10,7 +10,6 @@
   <div class="page-meta mono">{{ last_sync[1] if last_sync else 0 }} total records</div>
 </div>
 
-<!-- Overall KPIs -->
 <div class="cards-row cards-4">
   <div class="card">
     <div class="card-label">Total Prints</div>
@@ -34,35 +33,33 @@
   </div>
 </div>
 
-<!-- TODAY TOTAL -->
 <div class="section-title">Today — {{ today }}</div>
 <div class="card" style="margin-bottom:16px;border-left:4px solid #e91e63">
   <div style="font-size:13px;font-weight:700;color:#e91e63;margin-bottom:14px">📊 ALL CITIES COMBINED</div>
   <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px">
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Total Parts</div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Total Parts</div>
       <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.prints }}</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Completed</div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Completed</div>
       <div style="font-size:28px;font-weight:800;margin-top:4px;color:#16a34a">{{ today_total.ok }}</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Failed</div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Failed</div>
       <div style="font-size:28px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.failed }}</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Machine Hours</div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Machine Hours</div>
       <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.hours }}h</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.5px">Material Used</div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Material Used</div>
       <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.mat_g }}g</div>
     </div>
   </div>
 </div>
 
-<!-- TODAY PER CITY -->
 <div class="cards-row cards-4">
   {% for city in cities %}
   {% set d = cities_today[city] %}
@@ -82,7 +79,6 @@
   {% endfor %}
 </div>
 
-<!-- ORDERS BY CITY -->
 <div class="section-title">Orders by City</div>
 <div class="cards-row cards-4">
   {% for city in cities %}
@@ -94,7 +90,7 @@
     </div>
     <div style="font-size:22px;font-weight:800;margin-top:6px">{{ o.total }}</div>
     <div style="font-size:12px;color:#9ca3af">orders</div>
-    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+    <div style="margin-top:8px;display:flex;gap:8px">
       <span class="badge b-fulfilled">✓ {{ o.fulfilled }}</span>
       <span class="badge b-pending">⏳ {{ o.pending }}</span>
     </div>
@@ -103,56 +99,50 @@
   {% endfor %}
 </div>
 
-<!-- RECENT PRINTS WITH TIME TRACKING -->
+<div class="section-title">📅 Daily Production Summary — All Cities</div>
 <div class="table-card">
   <div class="table-card-header">
-    🕐 Recent Prints — Time Tracking
-    <small>Latest 25 across all cities</small>
+    Daily Report
+    <small>Last 30 days · Parts per city · Machine hours</small>
   </div>
   <table>
     <thead>
       <tr>
         <th>Date</th>
-        <th>Part Name</th>
-        <th>City</th>
-        <th>Start Time</th>
-        <th>End Time</th>
-        <th>Duration</th>
-        <th>Mat.(g)</th>
-        <th>Status</th>
+        <th style="color:#2196F3;text-align:center">● Pune</th>
+        <th style="color:#9C27B0;text-align:center">● Bangalore</th>
+        <th style="color:#FF9800;text-align:center">● Hyderabad</th>
+        <th style="color:#43A047;text-align:center">● Delhi</th>
+        <th style="text-align:center;background:#f8f8f8">Total Parts</th>
+        <th style="text-align:center;background:#f8f8f8">Machine Hrs</th>
+        <th style="text-align:center;background:#f8f8f8">Material</th>
       </tr>
     </thead>
     <tbody>
-      {% for p in recent %}
-      {% set start_t = p[8][11:16] if p[8] and p[8]|length > 10 else '—' %}
-      {% set end_t   = p[9][11:16] if p[9] and p[9]|length > 10 else '—' %}
-      <tr>
-        <td class="mono" style="font-size:12px">{{ p[0] }}</td>
-        <td class="td-part" title="{{ p[1] }}" style="max-width:180px">{{ p[1] }}</td>
-        <td><span class="b-city" style="background:{{ city_color.get(p[3],'#999') }}">{{ p[3] }}</span></td>
-        <td class="mono" style="color:#1d4ed8;font-weight:600;font-size:13px">
-          {% if start_t != '—' %}🟢 {{ start_t }}{% else %}—{% endif %}
+      {% for row in daily_data %}
+      {% set date = row[0] %}
+      {% set cd = row[1] %}
+      {% set total_p = row[2] %}
+      {% set total_h = row[3] %}
+      {% set total_m = row[4] %}
+      <tr {% if date == today %}style="background:#f0fdf4"{% endif %}>
+        <td class="mono" style="font-size:12px{% if date==today %};color:#16a34a;font-weight:700{% endif %}">
+          {% if date == today %}🟢 {% endif %}{{ date }}
         </td>
-        <td class="mono" style="color:#7c3aed;font-weight:600;font-size:13px">
-          {% if end_t != '—' %}🔴 {{ end_t }}{% else %}
-            {% if p[7]=='Printing' %}<span style="color:#f59e0b">● Live</span>{% else %}—{% endif %}
+        {% for city in ['Pune','Bangalore','Hyderabad','Delhi'] %}
+        {% set c = cd[city] %}
+        <td style="text-align:center">
+          {% if c.parts > 0 %}
+          <span style="font-weight:700;color:{{ city_color[city] }}">{{ c.parts }}</span>
+          <br><span style="font-size:10px;color:#9ca3af">{{ c.hours }}h</span>
+          {% else %}
+          <span style="color:#e0e0e0">—</span>
           {% endif %}
         </td>
-        <td class="mono" style="font-weight:600">
-          {% if p[5] and p[5] > 0 %}
-            {% if p[5] >= 60 %}{{ (p[5]//60) }}h {{ (p[5]%60) }}m
-            {% else %}{{ p[5] }}m{% endif %}
-          {% else %}—{% endif %}
-        </td>
-        <td class="mono">{{ p[6] }}g</td>
-        <td>
-          {% if p[7]=='Completed'  %}<span class="badge b-completed">✓ Done</span>
-          {% elif p[7]=='Failed'   %}<span class="badge b-failed">✗ Failed</span>
-          {% elif p[7]=='Printing' %}<span class="badge b-printing">● Printing</span>
-          {% elif p[7]=='Queued'   %}<span class="badge b-cancelled">⏳ Queued</span>
-          {% else %}<span class="badge b-cancelled">{{ p[7] }}</span>
-          {% endif %}
-        </td>
+        {% endfor %}
+        <td style="text-align:center;background:#f8f8f8;font-weight:800;font-size:16px">{{ total_p }}</td>
+        <td style="text-align:center;background:#f8f8f8;font-weight:600">{{ total_h }}h</td>
+        <td style="text-align:center;background:#f8f8f8;font-size:12px;color:#555">{{ total_m }}g</td>
       </tr>
       {% endfor %}
     </tbody>
