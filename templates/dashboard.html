@@ -1,151 +1,59 @@
-{% extends "base.html" %}
-{% set active = 'dash' %}
-{% block title %}Dashboard{% endblock %}
-{% block content %}
-<div class="page-header">
-  <div>
-    <div class="page-title">Operations Dashboard</div>
-    <div class="page-meta">Today: {{ today }} &nbsp;|&nbsp; Last sync: {{ last_sync[0] if last_sync else '—' }}</div>
-  </div>
-  <div class="page-meta mono">{{ last_sync[1] if last_sync else 0 }} total records</div>
-</div>
-
-<div class="cards-row cards-4">
-  <div class="card">
-    <div class="card-label">Total Prints</div>
-    <div class="card-value">{{ total }}</div>
-    <div class="card-sub">All time, all cities</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Success Rate</div>
-    <div class="card-value text-green">{{ "%.0f"|format(completed/total*100 if total else 0) }}%</div>
-    <div class="card-sub">{{ completed }} completed / {{ failed }} failed</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Machine Hours</div>
-    <div class="card-value">{{ hrs_total }}h</div>
-    <div class="card-sub">Total all time</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Total Orders</div>
-    <div class="card-value" style="color:#e91e63">{{ total_orders }}</div>
-    <div class="card-sub">From Order Sheet</div>
-  </div>
-</div>
-
-<div class="section-title">Today — {{ today }}</div>
-<div class="card" style="margin-bottom:16px;border-left:4px solid #e91e63">
-  <div style="font-size:13px;font-weight:700;color:#e91e63;margin-bottom:14px">📊 ALL CITIES COMBINED</div>
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:16px">
-    <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Total Parts</div>
-      <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.prints }}</div>
-    </div>
-    <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Completed</div>
-      <div style="font-size:28px;font-weight:800;margin-top:4px;color:#16a34a">{{ today_total.ok }}</div>
-    </div>
-    <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Failed</div>
-      <div style="font-size:28px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.failed }}</div>
-    </div>
-    <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Machine Hours</div>
-      <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.hours }}h</div>
-    </div>
-    <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Material Used</div>
-      <div style="font-size:28px;font-weight:800;margin-top:4px">{{ today_total.mat_g }}g</div>
-    </div>
-  </div>
-</div>
-
-<div class="cards-row cards-4">
-  {% for city in cities %}
-  {% set d = cities_today[city] %}
-  <a href="/city/{{ city }}" style="text-decoration:none">
-  <div class="city-card" style="border-top-color:{{ d.color }}">
-    <div class="city-card-name" style="color:{{ d.color }}">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ d.color }};margin-right:6px;vertical-align:middle"></span>{{ city }}
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
-      <div><div style="font-size:10px;color:#9ca3af">Parts</div><div style="font-size:20px;font-weight:800">{{ d.prints }}</div></div>
-      <div><div style="font-size:10px;color:#9ca3af">Done</div><div style="font-size:20px;font-weight:800;color:#16a34a">{{ d.ok }}</div></div>
-      <div><div style="font-size:10px;color:#9ca3af">Hours</div><div style="font-size:16px;font-weight:700">{{ d.hours }}h</div></div>
-      <div><div style="font-size:10px;color:#9ca3af">Material</div><div style="font-size:16px;font-weight:700">{{ d.mat_g }}g</div></div>
-    </div>
-  </div>
-  </a>
-  {% endfor %}
-</div>
-
-<div class="section-title">Orders by City</div>
-<div class="cards-row cards-4">
-  {% for city in cities %}
-  {% set o = ord_city[city] %}
-  <a href="/orders?city={{ city }}" style="text-decoration:none">
-  <div class="city-card" style="border-top-color:{{ city_color[city] }};cursor:pointer">
-    <div class="city-card-name" style="color:{{ city_color[city] }}">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ city_color[city] }};margin-right:6px;vertical-align:middle"></span>{{ city }}
-    </div>
-    <div style="font-size:22px;font-weight:800;margin-top:6px">{{ o.total }}</div>
-    <div style="font-size:12px;color:#9ca3af">orders</div>
-    <div style="margin-top:8px;display:flex;gap:8px">
-      <span class="badge b-fulfilled">✓ {{ o.fulfilled }}</span>
-      <span class="badge b-pending">⏳ {{ o.pending }}</span>
-    </div>
-  </div>
-  </a>
-  {% endfor %}
-</div>
-
-<div class="section-title">📅 Daily Production Summary — All Cities</div>
-<div class="table-card">
-  <div class="table-card-header">
-    Daily Report
-    <small>Last 30 days · Parts per city · Machine hours</small>
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th style="color:#2196F3;text-align:center">● Pune</th>
-        <th style="color:#9C27B0;text-align:center">● Bangalore</th>
-        <th style="color:#FF9800;text-align:center">● Hyderabad</th>
-        <th style="color:#43A047;text-align:center">● Delhi</th>
-        <th style="text-align:center;background:#f8f8f8">Total Parts</th>
-        <th style="text-align:center;background:#f8f8f8">Machine Hrs</th>
-        <th style="text-align:center;background:#f8f8f8">Material</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in daily_data %}
-      {% set date = row[0] %}
-      {% set cd = row[1] %}
-      {% set total_p = row[2] %}
-      {% set total_h = row[3] %}
-      {% set total_m = row[4] %}
-      <tr {% if date == today %}style="background:#f0fdf4"{% endif %}>
-        <td class="mono" style="font-size:12px{% if date==today %};color:#16a34a;font-weight:700{% endif %}">
-          {% if date == today %}🟢 {% endif %}{{ date }}
-        </td>
-        {% for city in ['Pune','Bangalore','Hyderabad','Delhi'] %}
-        {% set c = cd[city] %}
-        <td style="text-align:center">
-          {% if c.parts > 0 %}
-          <span style="font-weight:700;color:{{ city_color[city] }}">{{ c.parts }}</span>
-          <br><span style="font-size:10px;color:#9ca3af">{{ c.hours }}h</span>
-          {% else %}
-          <span style="color:#e0e0e0">—</span>
-          {% endif %}
-        </td>
-        {% endfor %}
-        <td style="text-align:center;background:#f8f8f8;font-weight:800;font-size:16px">{{ total_p }}</td>
-        <td style="text-align:center;background:#f8f8f8;font-weight:600">{{ total_h }}h</td>
-        <td style="text-align:center;background:#f8f8f8;font-size:12px;color:#555">{{ total_m }}g</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+{% extends "base.html" %} {% set active = 'dash' %} {% block title %}Dashboard{% endblock %} {% block content %}
+Operations Dashboard
+Today: {{ today }}  |  Last sync: {{ last_sync[0] if last_sync else '—' }}
+{{ last_sync[1] if last_sync else 0 }} total records
+Total Prints
+{{ total }}
+All time, all cities
+Success Rate
+{{ "%.0f"|format(completed/total*100 if total else 0) }}%
+{{ completed }} completed / {{ failed }} failed
+Machine Hours
+{{ hrs_total }}h
+Total all time
+Total Orders
+{{ total_orders }}
+From Order Sheet
+Today — {{ today }}
+📊 ALL CITIES COMBINED
+Total Parts
+{{ today_total.prints }}
+Completed
+{{ today_total.ok }}
+In Process
+{{ today_total.live }}
+Failed
+{{ today_total.failed }}
+Machine Hours
+{{ today_total.hours }}h
+Material Used
+{{ today_total.mat_g }}g
+{% for city in cities %} {% set d = cities_today[city] %}
+{{ city }}
+Parts
+{{ d.prints }}
+Done
+{{ d.ok }}
+Hours
+{{ d.hours }}h
+Material
+{{ d.mat_g }}g
+{% endfor %}
+Orders by City
+{% for city in cities %} {% set o = ord_city[city] %}
+{{ city }}
+{{ o.total }}
+orders
+✓ {{ o.fulfilled }}
+⏳ {{ o.pending }}
+{% endfor %}
+📅 Daily Production Summary — All Cities Last 30 days · Parts per city · Machine hours
+{% if daily_data %} {% for row in daily_data %} {% set d = row[0] %} {% set cd = row[1] %} {% set tp = row[2] %} {% set th = row[3] %} {% set tm = row[4] %} {% endfor %} {% else %} {% endif %}
+Date	● Pune	● Bangalore	● Hyderabad	● Delhi	Total Parts	Machine Hrs	Material
+{{ d }}{% if d == today %} 🟢{% endif %}	{% if cd['Pune'].parts > 0 %} {{ cd['Pune'].parts }} ({{ cd['Pune'].hours }}h) {% else %}—{% endif %}	{% if cd['Bangalore'].parts > 0 %} {{ cd['Bangalore'].parts }} ({{ cd['Bangalore'].hours }}h) {% else %}—{% endif %}	{% if cd['Hyderabad'].parts > 0 %} {{ cd['Hyderabad'].parts }} ({{ cd['Hyderabad'].hours }}h) {% else %}—{% endif %}	{% if cd['Delhi'].parts > 0 %} {{ cd['Delhi'].parts }} ({{ cd['Delhi'].hours }}h) {% else %}—{% endif %}	{{ tp }}	{{ th }}h	{{ tm }}g
+No data — click Sync Now
+🕐 Recent Prints — Time Tracking Latest 25 across all cities · IST time
+{% for p in recent %} {% set st = p[8][11:16] if p[8] and p[8]|length > 10 else '—' %} {% set et = p[9][11:16] if p[9] and p[9]|length > 10 else '—' %} {% endfor %}
+Date	Part Name	City	🟢 Start	🔴 End	Duration	Mat.(g)	Status
+{{ p[0] }}	{% if p[7]=='In Process' %}●{% endif %} {{ p[1] }}	{{ p[3] }}	{{ st }}	{% if p[7]=='In Process' %}● Live {% elif et != '—' %}{{ et }} {% else %}—{% endif %}	{% if p[5] and p[5]>0 %} {% if p[5]>=60 %}{{ p[5]//60 }}h {{ p[5]%60 }}m{% else %}{{ p[5] }}m{% endif %} {% else %}—{% endif %}	{{ p[6] }}g	{% if p[7]=='Completed' %}✓ Done {% elif p[7]=='Failed' %}✗ Failed {% elif p[7]=='In Process' %}🔄 In Process {% elif p[7]=='Cancelled' %}Cancelled {% else %}{{ p[7] }}{% endif %}
 {% endblock %}
