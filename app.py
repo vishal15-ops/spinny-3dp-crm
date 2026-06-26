@@ -430,8 +430,8 @@ def dashboard():
     daily_data = []
     for drow in dates:
         d = drow[0]
-        city_row = {}
         total_p = 0; total_h = 0.0; total_m = 0
+        city_row = {}
         for cn in CITIES:
             r = db.execute("""
                 SELECT COUNT(*),
@@ -441,7 +441,17 @@ def dashboard():
             p, h, m = r[0] or 0, float(r[1] or 0), int(r[2] or 0)
             city_row[cn] = {"parts": p, "hours": h, "mat_g": m}
             total_p += p; total_h += h; total_m += m
-        daily_data.append((d, city_row, total_p, round(total_h,1), total_m))
+        # Use dict (not tuple) for Jinja2 compatibility
+        daily_data.append({
+            "date":        d,
+            "Pune":        city_row.get("Pune",      {"parts":0,"hours":0.0,"mat_g":0}),
+            "Bangalore":   city_row.get("Bangalore",  {"parts":0,"hours":0.0,"mat_g":0}),
+            "Hyderabad":   city_row.get("Hyderabad",  {"parts":0,"hours":0.0,"mat_g":0}),
+            "Delhi":       city_row.get("Delhi",      {"parts":0,"hours":0.0,"mat_g":0}),
+            "total_parts": total_p,
+            "total_hours": round(total_h,1),
+            "total_mat":   total_m
+        })
  
     last_sync = db.execute(
         "SELECT synced_at,total_records FROM sync_log ORDER BY id DESC LIMIT 1"
