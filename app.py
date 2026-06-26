@@ -479,7 +479,7 @@ def dashboard():
         total=total, completed=completed, failed=failed, in_proc=in_proc,
         hrs_total=round(hrs_total,1), mat_total=round(mat_total,2),
         cities_today=cities_today, today_total=today_total,
-        recent=recent, daily_data=daily_data,
+        recent=recent, daily_rows_html=daily_rows_html,
         last_sync=last_sync, today=today,
         city_color=CITY_COLOR, cities=CITIES,
         ord_city=ord_city, total_orders=len(orders),
