@@ -51,7 +51,6 @@ Daily Production Summary — All Cities Last 30 days · Parts per city · Machin
 {{ daily_rows_html | safe }}
 Date	Pune	Bangalore	Hyderabad	Delhi	Total Parts	Machine Hrs	Material
 Recent Prints — Time Tracking Latest 25 across all cities · IST time
-{% for p in recent %} {% set st = p[8][11:16] if p[8] and p[8]|length > 10 else '—' %} {% set et = p[9][11:16] if p[9] and p[9]|length > 10 else '—' %} {% endfor %}
+{{ recent_html | safe }}
 Date	Part Name	City	Start	End	Duration	Mat.(g)	Status
-{{ p[0] }}	{% if p[7]=='In Process' %}● {% endif %}{{ p[1] }}	{{ p[3] }}	{{ st }}	{% if p[7]=='In Process' %}Live{% elif et != '—' %}{{ et }}{% else %}—{% endif %}	{% if p[5] and p[5]>0 %}{% if p[5]>=60 %}{{ p[5]//60 }}h {{ p[5]%60 }}m{% else %}{{ p[5] }}m{% endif %}{% else %}—{% endif %}	{{ p[6] }}g	{% if p[7]=='Completed' %}✓ Done {% elif p[7]=='Failed' %}✗ Failed {% elif p[7]=='In Process' %}In Process {% elif p[7]=='Cancelled' %}Cancelled {% else %}{{ p[7] }}{% endif %}
 {% endblock %}
