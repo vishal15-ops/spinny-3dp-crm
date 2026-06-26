@@ -15,45 +15,45 @@ Total Orders
 {{ total_orders }}
 From Order Sheet
 Today — {{ today }}
-📊 ALL CITIES COMBINED
+ALL CITIES COMBINED
 Total Parts
-{{ today_total.prints }}
+{{ today_total['prints'] }}
 Completed
-{{ today_total.ok }}
+{{ today_total['ok'] }}
 In Process
-{{ today_total.live }}
+{{ today_total.get('live', 0) }}
 Failed
-{{ today_total.failed }}
+{{ today_total['failed'] }}
 Machine Hours
-{{ today_total.hours }}h
+{{ today_total['hours'] }}h
 Material Used
-{{ today_total.mat_g }}g
-{% for city in cities %} {% set d = cities_today[city] %}
+{{ today_total['mat_g'] }}g
+{% for city in cities %}
 {{ city }}
 Parts
-{{ d.prints }}
+{{ cities_today[city]['prints'] }}
 Done
-{{ d.ok }}
+{{ cities_today[city]['ok'] }}
 Hours
-{{ d.hours }}h
+{{ cities_today[city]['hours'] }}h
 Material
-{{ d.mat_g }}g
+{{ cities_today[city]['mat_g'] }}g
 {% endfor %}
 Orders by City
-{% for city in cities %} {% set o = ord_city[city] %}
+{% for city in cities %}
 {{ city }}
-{{ o.total }}
+{{ ord_city[city]['total'] }}
 orders
-✓ {{ o.fulfilled }}
-⏳ {{ o.pending }}
+✓ {{ ord_city[city]['fulfilled'] }}
+⏳ {{ ord_city[city]['pending'] }}
 {% endfor %}
-📅 Daily Production Summary — All Cities Last 30 days · Parts per city · Machine hours
-{% if daily_data %} {% for row in daily_data %} {% set d = row[0] %} {% set cd = row[1] %} {% set tp = row[2] %} {% set th = row[3] %} {% set tm = row[4] %} {% endfor %} {% else %} {% endif %}
-Date	● Pune	● Bangalore	● Hyderabad	● Delhi	Total Parts	Machine Hrs	Material
-{{ d }}{% if d == today %} 🟢{% endif %}	{% if cd['Pune'].parts > 0 %} {{ cd['Pune'].parts }} ({{ cd['Pune'].hours }}h) {% else %}—{% endif %}	{% if cd['Bangalore'].parts > 0 %} {{ cd['Bangalore'].parts }} ({{ cd['Bangalore'].hours }}h) {% else %}—{% endif %}	{% if cd['Hyderabad'].parts > 0 %} {{ cd['Hyderabad'].parts }} ({{ cd['Hyderabad'].hours }}h) {% else %}—{% endif %}	{% if cd['Delhi'].parts > 0 %} {{ cd['Delhi'].parts }} ({{ cd['Delhi'].hours }}h) {% else %}—{% endif %}	{{ tp }}	{{ th }}h	{{ tm }}g
+Daily Production Summary — All Cities Last 30 days · Parts per city · Machine hours
+{% if daily_data %} {% for row in daily_data %} {% endfor %} {% else %} {% endif %}
+Date	Pune	Bangalore	Hyderabad	Delhi	Total Parts	Machine Hrs	Material
+{{ row[0] }}{% if row[0] == today %} ●{% endif %}	{% if row[1]['Pune']['parts'] > 0 %} {{ row[1]['Pune']['parts'] }} ({{ row[1]['Pune']['hours'] }}h) {% else %}—{% endif %}	{% if row[1]['Bangalore']['parts'] > 0 %} {{ row[1]['Bangalore']['parts'] }} ({{ row[1]['Bangalore']['hours'] }}h) {% else %}—{% endif %}	{% if row[1]['Hyderabad']['parts'] > 0 %} {{ row[1]['Hyderabad']['parts'] }} ({{ row[1]['Hyderabad']['hours'] }}h) {% else %}—{% endif %}	{% if row[1]['Delhi']['parts'] > 0 %} {{ row[1]['Delhi']['parts'] }} ({{ row[1]['Delhi']['hours'] }}h) {% else %}—{% endif %}	{{ row[2] }}	{{ row[3] }}h	{{ row[4] }}g
 No data — click Sync Now
-🕐 Recent Prints — Time Tracking Latest 25 across all cities · IST time
+Recent Prints — Time Tracking Latest 25 across all cities · IST time
 {% for p in recent %} {% set st = p[8][11:16] if p[8] and p[8]|length > 10 else '—' %} {% set et = p[9][11:16] if p[9] and p[9]|length > 10 else '—' %} {% endfor %}
-Date	Part Name	City	🟢 Start	🔴 End	Duration	Mat.(g)	Status
-{{ p[0] }}	{% if p[7]=='In Process' %}●{% endif %} {{ p[1] }}	{{ p[3] }}	{{ st }}	{% if p[7]=='In Process' %}● Live {% elif et != '—' %}{{ et }} {% else %}—{% endif %}	{% if p[5] and p[5]>0 %} {% if p[5]>=60 %}{{ p[5]//60 }}h {{ p[5]%60 }}m{% else %}{{ p[5] }}m{% endif %} {% else %}—{% endif %}	{{ p[6] }}g	{% if p[7]=='Completed' %}✓ Done {% elif p[7]=='Failed' %}✗ Failed {% elif p[7]=='In Process' %}🔄 In Process {% elif p[7]=='Cancelled' %}Cancelled {% else %}{{ p[7] }}{% endif %}
+Date	Part Name	City	Start	End	Duration	Mat.(g)	Status
+{{ p[0] }}	{% if p[7]=='In Process' %}● {% endif %}{{ p[1] }}	{{ p[3] }}	{{ st }}	{% if p[7]=='In Process' %}Live{% elif et != '—' %}{{ et }}{% else %}—{% endif %}	{% if p[5] and p[5]>0 %}{% if p[5]>=60 %}{{ p[5]//60 }}h {{ p[5]%60 }}m{% else %}{{ p[5] }}m{% endif %}{% else %}—{% endif %}	{{ p[6] }}g	{% if p[7]=='Completed' %}✓ Done {% elif p[7]=='Failed' %}✗ Failed {% elif p[7]=='In Process' %}In Process {% elif p[7]=='Cancelled' %}Cancelled {% else %}{{ p[7] }}{% endif %}
 {% endblock %}
