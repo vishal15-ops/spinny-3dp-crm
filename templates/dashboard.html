@@ -17,40 +17,40 @@ From Order Sheet
 Today — {{ today }}
 ALL CITIES COMBINED
 Total Parts
-{{ today_total['prints'] }}
+{{ today_total.prints }}
 Completed
-{{ today_total['ok'] }}
+{{ today_total.ok }}
 In Process
-{{ today_total.get('live', 0) }}
+{{ today_total.live if today_total.live is defined else 0 }}
 Failed
-{{ today_total['failed'] }}
+{{ today_total.failed }}
 Machine Hours
-{{ today_total['hours'] }}h
+{{ today_total.hours }}h
 Material Used
-{{ today_total['mat_g'] }}g
+{{ today_total.mat_g }}g
 {% for city in cities %}
 {{ city }}
 Parts
-{{ cities_today[city]['prints'] }}
+{{ cities_today[city].prints }}
 Done
-{{ cities_today[city]['ok'] }}
+{{ cities_today[city].ok }}
 Hours
-{{ cities_today[city]['hours'] }}h
+{{ cities_today[city].hours }}h
 Material
-{{ cities_today[city]['mat_g'] }}g
+{{ cities_today[city].mat_g }}g
 {% endfor %}
 Orders by City
 {% for city in cities %}
 {{ city }}
-{{ ord_city[city]['total'] }}
+{{ ord_city[city].total }}
 orders
-✓ {{ ord_city[city]['fulfilled'] }}
-⏳ {{ ord_city[city]['pending'] }}
+✓ {{ ord_city[city].fulfilled }}
+⏳ {{ ord_city[city].pending }}
 {% endfor %}
 Daily Production Summary — All Cities Last 30 days · Parts per city · Machine hours
-{% if daily_data %} {% for row in daily_data %} {% endfor %} {% else %} {% endif %}
+{% for dr in daily_data %} {% else %} {% endfor %}
 Date	Pune	Bangalore	Hyderabad	Delhi	Total Parts	Machine Hrs	Material
-{{ row[0] }}{% if row[0] == today %} ●{% endif %}	{% if row[1]['Pune']['parts'] > 0 %} {{ row[1]['Pune']['parts'] }} ({{ row[1]['Pune']['hours'] }}h) {% else %}—{% endif %}	{% if row[1]['Bangalore']['parts'] > 0 %} {{ row[1]['Bangalore']['parts'] }} ({{ row[1]['Bangalore']['hours'] }}h) {% else %}—{% endif %}	{% if row[1]['Hyderabad']['parts'] > 0 %} {{ row[1]['Hyderabad']['parts'] }} ({{ row[1]['Hyderabad']['hours'] }}h) {% else %}—{% endif %}	{% if row[1]['Delhi']['parts'] > 0 %} {{ row[1]['Delhi']['parts'] }} ({{ row[1]['Delhi']['hours'] }}h) {% else %}—{% endif %}	{{ row[2] }}	{{ row[3] }}h	{{ row[4] }}g
+{{ dr.date }}{% if dr.date == today %} ●{% endif %}	{% if dr.Pune.parts > 0 %}{{ dr.Pune.parts }} ({{ dr.Pune.hours }}h){% else %}—{% endif %}	{% if dr.Bangalore.parts > 0 %}{{ dr.Bangalore.parts }} ({{ dr.Bangalore.hours }}h){% else %}—{% endif %}	{% if dr.Hyderabad.parts > 0 %}{{ dr.Hyderabad.parts }} ({{ dr.Hyderabad.hours }}h){% else %}—{% endif %}	{% if dr.Delhi.parts > 0 %}{{ dr.Delhi.parts }} ({{ dr.Delhi.hours }}h){% else %}—{% endif %}	{{ dr.total_parts }}	{{ dr.total_hours }}h	{{ dr.total_mat }}g
 No data — click Sync Now
 Recent Prints — Time Tracking Latest 25 across all cities · IST time
 {% for p in recent %} {% set st = p[8][11:16] if p[8] and p[8]|length > 10 else '—' %} {% set et = p[9][11:16] if p[9] and p[9]|length > 10 else '—' %} {% endfor %}
