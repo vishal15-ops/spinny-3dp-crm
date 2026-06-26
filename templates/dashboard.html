@@ -1,56 +1,86 @@
-{% extends "base.html" %} {% set active = 'dash' %} {% block title %}Dashboard{% endblock %} {% block content %}
-Operations Dashboard
-Today: {{ today }}  |  Last sync: {{ last_sync[0] if last_sync else '—' }}
-{{ last_sync[1] if last_sync else 0 }} total records
-Total Prints
-{{ total }}
-All time, all cities
-Success Rate
-{{ "%.0f"|format(completed/total*100 if total else 0) }}%
-{{ completed }} completed / {{ failed }} failed
-Machine Hours
-{{ hrs_total }}h
-Total all time
-Total Orders
-{{ total_orders }}
-From Order Sheet
-Today — {{ today }}
-ALL CITIES COMBINED
-Total Parts
-{{ today_total.prints }}
-Completed
-{{ today_total.ok }}
-In Process
-{{ today_total.live if today_total.live is defined else 0 }}
-Failed
-{{ today_total.failed }}
-Machine Hours
-{{ today_total.hours }}h
-Material Used
-{{ today_total.mat_g }}g
-{% for city in cities %}
-{{ city }}
-Parts
-{{ cities_today[city].prints }}
-Done
-{{ cities_today[city].ok }}
-Hours
-{{ cities_today[city].hours }}h
-Material
-{{ cities_today[city].mat_g }}g
-{% endfor %}
-Orders by City
-{% for city in cities %}
-{{ city }}
-{{ ord_city[city].total }}
-orders
-✓ {{ ord_city[city].fulfilled }}
-⏳ {{ ord_city[city].pending }}
-{% endfor %}
-Daily Production Summary — All Cities Last 30 days · Parts per city · Machine hours
-{{ daily_rows_html | safe }}
-Date	Pune	Bangalore	Hyderabad	Delhi	Total Parts	Machine Hrs	Material
-Recent Prints — Time Tracking Latest 25 across all cities · IST time
-{{ recent_html | safe }}
-Date	Part Name	City	Start	End	Duration	Mat.(g)	Status
-{% endblock %}
+import os
+ 
+TEMPLATES_DIR = r"C:\Users\Vishal\Downloads\spinny_crm_v8\spinny_crm\templates"
+OUTPUT_PATH = os.path.join(TEMPLATES_DIR, "dashboard.html")
+ 
+CONTENT = r"""{% extends "base.html" %}
+{% set active = 'dash' %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="page-title">Operations Dashboard</div>
+    <div class="page-meta">Today: {{ today }} &nbsp;|&nbsp; Last sync: {{ last_sync[0] if last_sync else '&#8212;' }}</div>
+  </div>
+  <div class="page-meta mono">{{ last_sync[1] if last_sync else 0 }} total records</div>
+</div>
+<div class="cards-row cards-4">
+  <div class="card"><div class="card-label">Total Prints</div><div class="card-value">{{ total }}</div><div class="card-sub">All time, all cities</div></div>
+  <div class="card"><div class="card-label">Success Rate</div><div class="card-value text-green">{{ "%.0f"|format(completed/total*100 if total else 0) }}%</div><div class="card-sub">{{ completed }} completed / {{ failed }} failed</div></div>
+  <div class="card"><div class="card-label">Machine Hours</div><div class="card-value">{{ hrs_total }}h</div><div class="card-sub">Total all time</div></div>
+  <div class="card"><div class="card-label">Total Orders</div><div class="card-value" style="color:#e91e63">{{ total_orders }}</div><div class="card-sub">From Order Sheet</div></div>
+</div>
+<div class="section-title">Today &#8212; {{ today }}</div>
+<div class="card" style="margin-bottom:16px;border-left:4px solid #e91e63">
+  <div style="font-size:13px;font-weight:700;color:#e91e63;margin-bottom:14px">ALL CITIES COMBINED</div>
+  <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:16px">
+    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Total Parts</div><div style="font-size:26px;font-weight:800;margin-top:4px">{{ today_total.prints }}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Completed</div><div style="font-size:26px;font-weight:800;margin-top:4px;color:#16a34a">{{ today_total.ok }}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">In Process</div><div style="font-size:26px;font-weight:800;margin-top:4px;color:#f59e0b">{{ today_total.live if today_total.live is defined else 0 }}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Failed</div><div style="font-size:26px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.failed }}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Machine Hours</div><div style="font-size:26px;font-weight:800;margin-top:4px">{{ today_total.hours }}h</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Material Used</div><div style="font-size:26px;font-weight:800;margin-top:4px">{{ today_total.mat_g }}g</div></div>
+  </div>
+</div>
+<div class="cards-row cards-4">
+  {% for city in cities %}
+  <a href="/city/{{ city }}" style="text-decoration:none">
+  <div class="city-card" style="border-top-color:{{ cities_today[city].color }}">
+    <div class="city-card-name" style="color:{{ cities_today[city].color }}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ cities_today[city].color }};margin-right:6px;vertical-align:middle"></span>{{ city }}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px">
+      <div><div style="font-size:10px;color:#9ca3af">Parts</div><div style="font-size:20px;font-weight:800">{{ cities_today[city].prints }}</div></div>
+      <div><div style="font-size:10px;color:#9ca3af">Done</div><div style="font-size:20px;font-weight:800;color:#16a34a">{{ cities_today[city].ok }}</div></div>
+      <div><div style="font-size:10px;color:#9ca3af">Hours</div><div style="font-size:16px;font-weight:700">{{ cities_today[city].hours }}h</div></div>
+      <div><div style="font-size:10px;color:#9ca3af">Material</div><div style="font-size:16px;font-weight:700">{{ cities_today[city].mat_g }}g</div></div>
+    </div>
+  </div>
+  </a>
+  {% endfor %}
+</div>
+<div class="section-title">Orders by City</div>
+<div class="cards-row cards-4">
+  {% for city in cities %}
+  <a href="/orders?city={{ city }}" style="text-decoration:none">
+  <div class="city-card" style="border-top-color:{{ city_color[city] }}">
+    <div class="city-card-name" style="color:{{ city_color[city] }}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ city_color[city] }};margin-right:6px;vertical-align:middle"></span>{{ city }}</div>
+    <div style="font-size:22px;font-weight:800;margin-top:6px">{{ ord_city[city].total }}</div>
+    <div style="font-size:12px;color:#9ca3af">orders</div>
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <span class="badge b-fulfilled">&#10003; {{ ord_city[city].fulfilled }}</span>
+      <span class="badge b-pending">&#9203; {{ ord_city[city].pending }}</span>
+    </div>
+  </div>
+  </a>
+  {% endfor %}
+</div>
+<div class="table-card">
+  <div class="table-card-header">Daily Production Summary &#8212; All Cities<small>Last 30 days</small></div>
+  <table>
+    <thead><tr><th>Date</th><th style="color:#2196F3">Pune</th><th style="color:#9C27B0">Bangalore</th><th style="color:#FF9800">Hyderabad</th><th style="color:#43A047">Delhi</th><th>Total</th><th>Hours</th><th>Material</th></tr></thead>
+    <tbody>{{ daily_rows_html | safe }}</tbody>
+  </table>
+</div>
+<div class="table-card">
+  <div class="table-card-header">Recent Prints &#8212; Time Tracking<small>Latest 25 all cities</small></div>
+  <table>
+    <thead><tr><th>Date</th><th>Part Name</th><th>City</th><th>Start</th><th>End</th><th>Duration</th><th>Mat.(g)</th><th>Status</th></tr></thead>
+    <tbody>{{ recent_html | safe }}</tbody>
+  </table>
+</div>
+{% endblock %}"""
+ 
+os.makedirs(TEMPLATES_DIR, exist_ok=True)
+with open(OUTPUT_PATH, 'w', encoding='utf-8') as f:
+    f.write(CONTENT)
+print("Written: " + OUTPUT_PATH)
+ 
