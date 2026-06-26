@@ -110,6 +110,8 @@ def compute_record(t, acc):
         status="Completed"
     if status=="Queued" and et:
         status="Completed"
+    if status=="Cancelled":
+        status="Failed"   # aborted print counts as failed
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -179,9 +181,10 @@ def startup_fixes():
     db=sqlite3.connect(DB_PATH)
     try:
         today=date.today().isoformat()
-        db.execute("UPDATE prints SET status='Completed' WHERE status IN ('In Process','Printing') AND date<?", (today,))
-        db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5")
-        db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND date<?", (today,))
+        # Normalize old data, then keep ONLY final results (Success/Failed)
+        db.execute("UPDATE prints SET status='Failed' WHERE status='Cancelled'")
+        db.execute("UPDATE prints SET status='Completed' WHERE status IN ('In Process','Printing','Queued') AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>10")
+        db.execute("DELETE FROM prints WHERE status NOT IN ('Completed','Failed')")
         db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'")
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
@@ -218,6 +221,11 @@ def do_sync():
             tid=str(t.get("id",""))
             if not tid: continue
             rec=compute_record(t, acc)
+            if rec["status"] not in ("Completed","Failed"):
+                # Printing / Queued -> not final yet. Skip (and drop any stale copy).
+                if tid in existing:
+                    db.execute("DELETE FROM prints WHERE task_id=?",(tid,))
+                continue
             if tid in existing:
                 db.execute("""UPDATE prints SET date=?,part_name=?,printer=?,city=?,material=?,
                     start_time=?,end_time=?,duration_min=?,material_g=?,status=?,device_model=?,
@@ -267,19 +275,12 @@ def build_recent_html(rows, today):
         et_hm=r_et[11:16] if len(r_et)>10 else "-"
         cc=CITY_COLOR.get(r_city,"#999")
         dur_str=(f"{r_dur//60}h {r_dur%60}m" if r_dur>=60 else f"{r_dur}m") if r_dur>0 else "-"
-        if r_status=="In Process":   et_cell="<span style='color:#f59e0b'>Live</span>"
-        elif et_hm!="-":             et_cell=et_hm
-        else:                        et_cell="-"
+        et_cell=et_hm if et_hm!="-" else "-"
         if r_status=="Completed":    badge="<span class='badge b-completed'>&#10003; Done</span>"
         elif r_status=="Failed":     badge="<span class='badge b-failed'>&#10007; Failed</span>"
-        elif r_status=="In Process": badge="<span class='badge b-printing' style='background:#f59e0b;color:#fff'>In Process</span>"
-        elif r_status=="Cancelled":  badge="<span class='badge b-cancelled'>Cancelled</span>"
-        elif r_status=="Queued":     badge="<span class='badge b-queued'>&#9203; Queued</span>"
         else:                        badge=f"<span class='badge b-cancelled'>{r_status}</span>"
-        dot="<span style='color:#f59e0b'>&#9679; </span>" if r_status=="In Process" else ""
-        rs="style='background:rgba(245,158,11,0.08)'" if r_status=="In Process" else ""
-        html+=(f"<tr {rs}><td class='mono'>{r_date}</td>"
-               f"<td class='td-part' title='{r_part}'>{dot}{r_part}</td>"
+        html+=(f"<tr><td class='mono'>{r_date}</td>"
+               f"<td class='td-part' title='{r_part}'>{r_part}</td>"
                f"<td><span class='b-city' style='background:{cc}'>{r_city}</span></td>"
                f"<td class='mono' style='color:#1d4ed8;font-weight:600'>{st_hm}</td>"
                f"<td class='mono' style='color:#7c3aed;font-weight:600'>{et_cell}</td>"
@@ -293,7 +294,7 @@ def build_daily_html(db, today):
     for drow in dates:
         d=str(drow[0]); total_p=0; total_h=0.0; total_m=0; cells=""
         for cn in CITIES:
-            r=db.execute(f"SELECT COUNT(*),COALESCE(ROUND({HOURS_SQL}/60.0,1),0),COALESCE(ROUND({MAT_SQL},0),0) FROM prints WHERE date=? AND city=? AND status NOT IN ('Queued','Cancelled')",(d,cn)).fetchone()
+            r=db.execute(f"SELECT COUNT(*),COALESCE(ROUND({HOURS_SQL}/60.0,1),0),COALESCE(ROUND({MAT_SQL},0),0) FROM prints WHERE date=? AND city=?",(d,cn)).fetchone()
             p,h,m=int(r[0] or 0),float(r[1] or 0),int(r[2] or 0)
             total_p+=p; total_h+=h; total_m+=m
             if p>0: cells+=f"<td class='mono'><span style='color:{cc[cn]};font-weight:600'>{p}</span> <span style='font-size:11px;color:#9ca3af'>({h}h)</span></td>"
@@ -318,7 +319,7 @@ def dashboard():
         r=db.execute(f"""SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL},
             COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
             COALESCE(SUM(CASE WHEN status='In Process' THEN 1 ELSE 0 END),0)
-            FROM prints WHERE city=? AND date=? AND status NOT IN ('Queued','Cancelled')""",(c,today)).fetchone()
+            FROM prints WHERE city=? AND date=?""",(c,today)).fetchone()
         cities_today[c]={"prints":r[0],"hours":round(float(r[1] or 0),1),"mat_g":round(float(r[2] or 0),1),"ok":r[3],"live":r[4],"color":CITY_COLOR[c]}
     today_total={"prints":sum(v["prints"] for v in cities_today.values()),"ok":sum(v["ok"] for v in cities_today.values()),
                  "live":sum(v["live"] for v in cities_today.values()),"hours":round(sum(v["hours"] for v in cities_today.values()),1),
@@ -353,7 +354,7 @@ def city_page(city):
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
         COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
         {HOURS_SQL}/60.0,{MAT_SQL}/1000.0 FROM prints WHERE city=?""",(city,)).fetchone()
-    td=db.execute(f"SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL} FROM prints WHERE city=? AND date=? AND status NOT IN ('Queued','Cancelled')",(city,today)).fetchone()
+    td=db.execute(f"SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL} FROM prints WHERE city=? AND date=?",(city,today)).fetchone()
     rows=db.execute("SELECT date,part_name,printer,material,start_time,end_time,duration_min,material_g,status,device_model,filament_color FROM prints WHERE city=? ORDER BY date DESC,start_time DESC",(city,)).fetchall()
     db.close()
     return render_template('city.html',city=city,color=CITY_COLOR[city],
