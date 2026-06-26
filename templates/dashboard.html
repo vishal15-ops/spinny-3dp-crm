@@ -48,10 +48,8 @@ orders
 ⏳ {{ ord_city[city].pending }}
 {% endfor %}
 Daily Production Summary — All Cities Last 30 days · Parts per city · Machine hours
-{% for dr in daily_data %} {% else %} {% endfor %}
+{{ daily_rows_html | safe }}
 Date	Pune	Bangalore	Hyderabad	Delhi	Total Parts	Machine Hrs	Material
-{{ dr.date }}{% if dr.date == today %} ●{% endif %}	{% if dr.Pune.parts > 0 %}{{ dr.Pune.parts }} ({{ dr.Pune.hours }}h){% else %}—{% endif %}	{% if dr.Bangalore.parts > 0 %}{{ dr.Bangalore.parts }} ({{ dr.Bangalore.hours }}h){% else %}—{% endif %}	{% if dr.Hyderabad.parts > 0 %}{{ dr.Hyderabad.parts }} ({{ dr.Hyderabad.hours }}h){% else %}—{% endif %}	{% if dr.Delhi.parts > 0 %}{{ dr.Delhi.parts }} ({{ dr.Delhi.hours }}h){% else %}—{% endif %}	{{ dr.total_parts }}	{{ dr.total_hours }}h	{{ dr.total_mat }}g
-No data — click Sync Now
 Recent Prints — Time Tracking Latest 25 across all cities · IST time
 {% for p in recent %} {% set st = p[8][11:16] if p[8] and p[8]|length > 10 else '—' %} {% set et = p[9][11:16] if p[9] and p[9]|length > 10 else '—' %} {% endfor %}
 Date	Part Name	City	Start	End	Duration	Mat.(g)	Status
