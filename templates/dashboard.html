@@ -1,9 +1,4 @@
-import os
- 
-TEMPLATES_DIR = r"C:\Users\Vishal\Downloads\spinny_crm_v8\spinny_crm\templates"
-OUTPUT_PATH = os.path.join(TEMPLATES_DIR, "dashboard.html")
- 
-CONTENT = r"""{% extends "base.html" %}
+{% extends "base.html" %}
 {% set active = 'dash' %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
@@ -77,10 +72,4 @@ CONTENT = r"""{% extends "base.html" %}
     <tbody>{{ recent_html | safe }}</tbody>
   </table>
 </div>
-{% endblock %}"""
- 
-os.makedirs(TEMPLATES_DIR, exist_ok=True)
-with open(OUTPUT_PATH, 'w', encoding='utf-8') as f:
-    f.write(CONTENT)
-print("Written: " + OUTPUT_PATH)
- 
+{% endblock %}
