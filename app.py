@@ -1,4 +1,4 @@
-""Spinny 3DP CRM — Cloud Edition. Real status: In Process / Completed / Failed"""
+"""Spinny 3DP CRM - Cloud Edition. Real status: In Process / Completed / Failed"""
 import os, sqlite3, threading, time, html as _html
 from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
