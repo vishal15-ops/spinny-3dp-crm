@@ -1,4 +1,4 @@
-"""Spinny 3DP CRM - Cloud Edition. Real status: In Process / Completed / Failed"""
+"""Spinny 3DP CRM - Cloud Edition. Real data from Bambu API, auto-cleaned."""
 import os, sqlite3, threading, time, html as _html
 from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
@@ -53,7 +53,8 @@ def init_db():
             material TEXT, start_time TEXT, end_time TEXT,
             duration_min INTEGER DEFAULT 0, material_g REAL DEFAULT 0,
             status TEXT, device_model TEXT DEFAULT '',
-            filament_color TEXT DEFAULT '', ist_done INTEGER DEFAULT 0);
+            filament_color TEXT DEFAULT '', ist_done INTEGER DEFAULT 0,
+            cost_time INTEGER DEFAULT 0);
         CREATE TABLE IF NOT EXISTS sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             synced_at TEXT, total_records INTEGER, new_records INTEGER, note TEXT);
@@ -61,97 +62,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_city ON prints(city);""")
     for col in ["ALTER TABLE prints ADD COLUMN ist_done INTEGER DEFAULT 0",
                 "ALTER TABLE prints ADD COLUMN device_model TEXT DEFAULT ''",
-                "ALTER TABLE prints ADD COLUMN filament_color TEXT DEFAULT ''"]:
+                "ALTER TABLE prints ADD COLUMN filament_color TEXT DEFAULT ''",
+                "ALTER TABLE prints ADD COLUMN cost_time INTEGER DEFAULT 0"]:
         try: db.execute(col)
         except: pass
     db.commit(); db.close()
-
-def dedup_prints(db):
-    """One printer can run only ONE job at a time.
-    If two prints OVERLAP in time on the SAME printer -> phantom duplicate.
-    Keep one (priority: Completed > Failed > In Process > Queued)."""
-    rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min
-                       FROM prints
-                       WHERE start_time!='' AND end_time!='' AND LENGTH(end_time)>10
-                         AND printer NOT IN ('','Unknown')
-                         AND duration_min>0 AND duration_min<=1440
-                       ORDER BY printer,start_time""").fetchall()
-    by_printer=defaultdict(list)
-    for r in rows:
-        try:
-            st=datetime.strptime(r[2],"%Y-%m-%d %H:%M")
-            et=datetime.strptime(r[3],"%Y-%m-%d %H:%M")
-            if et<=st: continue
-            by_printer[r[1]].append({"id":r[0],"st":st,"et":et,"status":r[4]})
-        except: pass
-    rank={"Completed":4,"Failed":3,"In Process":2,"Queued":1}
-    to_del=set()
-    for printer,jobs in by_printer.items():
-        jobs.sort(key=lambda x:x["st"])
-        kept=[]
-        for j in jobs:
-            clash=None
-            for k in kept:
-                if j["st"]<k["et"] and k["st"]<j["et"]:   # time overlap
-                    clash=k; break
-            if clash:
-                jr=rank.get(j["status"],0); kr=rank.get(clash["status"],0)
-                if jr>kr:
-                    to_del.add(clash["id"]); kept.remove(clash); kept.append(j)
-                else:
-                    to_del.add(j["id"])
-            else:
-                kept.append(j)
-    for d in to_del:
-        db.execute("DELETE FROM prints WHERE id=?",(d,))
-    db.commit()
-    return len(to_del)
-
-def startup_fixes():
-    if not os.path.exists(DB_PATH): return
-    db=sqlite3.connect(DB_PATH)
-    try:
-        today=date.today().isoformat()
-        r1=db.execute("UPDATE prints SET status='Completed' WHERE status='In Process' AND date<?", (today,)).rowcount
-        db.execute("UPDATE prints SET status='Completed' WHERE status='Printing' AND date<?", (today,))
-        r2=db.execute("UPDATE prints SET status='Completed' WHERE status='In Process' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5 AND end_time<datetime('now','+5:30 hours','-10 minutes')").rowcount
-        db.execute("UPDATE prints SET status='Completed' WHERE status='Printing' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5 AND end_time<datetime('now','+5:30 hours','-10 minutes')")
-        db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5")
-        db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND date<?", (today,))
-        r3=db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'").rowcount
-        db.execute("UPDATE prints SET city='Bangalore' WHERE city='Unknown' AND printer LIKE '%engaluru%'")
-        db.execute("UPDATE prints SET city='Bangalore' WHERE city='Hyderabad' AND printer LIKE '%engaluru%'")
-        r4=db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440").rowcount
-        db.commit()
-        bad=db.execute("SELECT id,start_time,duration_min FROM prints WHERE start_time=end_time AND duration_min>0 AND start_time!=''").fetchall()
-        for rec in bad:
-            try:
-                st=datetime.strptime(rec[1],"%Y-%m-%d %H:%M")
-                db.execute("UPDATE prints SET end_time=? WHERE id=?", ((st+timedelta(minutes=rec[2])).strftime("%Y-%m-%d %H:%M"),rec[0]))
-            except: pass
-        utc=db.execute("SELECT id,start_time,end_time FROM prints WHERE (ist_done IS NULL OR ist_done=0) AND start_time!=''").fetchall()
-        r6=0
-        for rec in utc:
-            try:
-                st=datetime.strptime(rec[1],"%Y-%m-%d %H:%M")+timedelta(hours=5,minutes=30)
-                et=""
-                if rec[2] and len(str(rec[2]))>5:
-                    et=(datetime.strptime(rec[2],"%Y-%m-%d %H:%M")+timedelta(hours=5,minutes=30)).strftime("%Y-%m-%d %H:%M")
-                db.execute("UPDATE prints SET start_time=?,end_time=?,date=?,ist_done=1 WHERE id=?",
-                           (st.strftime("%Y-%m-%d %H:%M"),et,st.strftime("%Y-%m-%d"),rec[0]))
-                r6+=1
-            except: pass
-        bad2=db.execute("SELECT id,start_time,duration_min FROM prints WHERE start_time=end_time AND duration_min>0 AND start_time!=''").fetchall()
-        for rec in bad2:
-            try:
-                st=datetime.strptime(rec[1],"%Y-%m-%d %H:%M")
-                db.execute("UPDATE prints SET end_time=? WHERE id=?", ((st+timedelta(minutes=rec[2])).strftime("%Y-%m-%d %H:%M"),rec[0]))
-            except: pass
-        db.commit()
-        dn=dedup_prints(db)
-        print(f"[AUTO-FIX] OldDone:{r1} EndFix:{r2} Blr:{r3} DurCap:{r4} IST:{r6} Dedup:{dn}")
-    except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
-    finally: db.close()
 
 def parse_dt(v):
     if not v: return None
@@ -175,6 +90,107 @@ def get_material(t):
     except: pass
     return "ABS"
 
+def compute_record(t, acc):
+    """Turn one raw Bambu task into clean fields. costTime = REAL print time."""
+    st=parse_dt(t.get("startTime")); et=parse_dt(t.get("endTime"))
+    cost=int(t.get("costTime") or 0)
+    d_wall = int((et-st).total_seconds()/60) if (st and et and et>st) else 0
+    d_cost = cost//60 if (60<=cost<=86400) else 0
+    if 0 < d_wall <= 1440:
+        if d_cost and d_wall > d_cost*1.5 and (d_wall - d_cost) > 120:
+            dur = d_cost
+        else:
+            dur = d_wall
+    elif d_cost:
+        dur = d_cost
+    else:
+        dur = 0
+    status=STATUS_MAP.get(int(t.get("status") or 0),str(t.get("status","")))
+    if status in ("Queued","In Process") and et and (datetime.utcnow()-et).total_seconds()>300:
+        status="Completed"
+    if status=="Queued" and et:
+        status="Completed"
+    st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
+    if st_ist and dur>0 and status!="In Process":
+        et_ist=st_ist+timedelta(minutes=dur)
+    elif et:
+        et_ist=et.replace(tzinfo=timezone.utc).astimezone(IST)
+    else:
+        et_ist=None
+    printer=t.get("deviceName","Unknown")
+    city=acc["city_override"] or PRINTER_CITY.get(printer.strip(),"Unknown")
+    fil_color=""
+    try:
+        ams=t.get("amsDetailMapping") or []
+        if isinstance(ams,list) and ams and isinstance(ams[0],dict):
+            fil_color=ams[0].get("sourceColor","")[:6]
+    except: pass
+    return {
+        "date": st_ist.strftime("%Y-%m-%d") if st_ist else "",
+        "part": t.get("title","Unknown"),
+        "printer": printer, "city": city, "material": get_material(t),
+        "start": st_ist.strftime("%Y-%m-%d %H:%M") if st_ist else "",
+        "end": et_ist.strftime("%Y-%m-%d %H:%M") if et_ist else "",
+        "dur": dur, "matg": round(float(t.get("weight") or 0),2),
+        "status": status, "model": t.get("deviceModel",""),
+        "color": fil_color, "cost": cost,
+    }
+
+def dedup_prints(db):
+    """One printer = one job at a time. Overlapping prints on same printer -> phantom duplicate."""
+    rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min
+                       FROM prints
+                       WHERE start_time!='' AND end_time!='' AND LENGTH(end_time)>10
+                         AND printer NOT IN ('','Unknown')
+                         AND duration_min>0 AND duration_min<=1440
+                       ORDER BY printer,start_time""").fetchall()
+    by_printer=defaultdict(list)
+    for r in rows:
+        try:
+            st=datetime.strptime(r[2],"%Y-%m-%d %H:%M")
+            et=datetime.strptime(r[3],"%Y-%m-%d %H:%M")
+            if et<=st: continue
+            by_printer[r[1]].append({"id":r[0],"st":st,"et":et,"status":r[4]})
+        except: pass
+    rank={"Completed":4,"Failed":3,"In Process":2,"Queued":1}
+    to_del=set()
+    for printer,jobs in by_printer.items():
+        jobs.sort(key=lambda x:x["st"])
+        kept=[]
+        for j in jobs:
+            clash=None
+            for k in kept:
+                if j["st"]<k["et"] and k["st"]<j["et"]:
+                    clash=k; break
+            if clash:
+                if rank.get(j["status"],0)>rank.get(clash["status"],0):
+                    to_del.add(clash["id"]); kept.remove(clash); kept.append(j)
+                else:
+                    to_del.add(j["id"])
+            else:
+                kept.append(j)
+    for d in to_del:
+        db.execute("DELETE FROM prints WHERE id=?",(d,))
+    db.commit()
+    return len(to_del)
+
+def startup_fixes():
+    if not os.path.exists(DB_PATH): return
+    db=sqlite3.connect(DB_PATH)
+    try:
+        today=date.today().isoformat()
+        db.execute("UPDATE prints SET status='Completed' WHERE status IN ('In Process','Printing') AND date<?", (today,))
+        db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5")
+        db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND date<?", (today,))
+        db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'")
+        db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
+        db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
+        db.commit()
+        dn=dedup_prints(db)
+        print(f"[AUTO-FIX] Dedup:{dn}")
+    except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
+    finally: db.close()
+
 def fetch_tasks(token):
     s=requests.Session(); s.headers.update({"Authorization":f"Bearer {token}"})
     tasks,offset=[],0
@@ -195,56 +211,35 @@ def do_sync():
     print(f"[SYNC] {datetime.now().strftime('%H:%M:%S')}")
     db=get_db()
     existing=set(r[0] for r in db.execute("SELECT task_id FROM prints").fetchall())
-    new_count=0
+    new_count=0; upd_count=0
     for acc in ACCOUNTS:
         tasks=fetch_tasks(acc["token"])
         for t in tasks:
             tid=str(t.get("id",""))
+            if not tid: continue
+            rec=compute_record(t, acc)
             if tid in existing:
-                if int(t.get("status") or 0)==2 and not parse_dt(t.get("endTime")):
-                    db.execute("UPDATE prints SET status='In Process' WHERE task_id=? AND status!='In Process'",(tid,))
-                continue
-            st=parse_dt(t.get("startTime")); et=parse_dt(t.get("endTime"))
-            if st and et:
-                dur=int((et-st).total_seconds()/60)
-                if dur>1440 or dur<0: dur=0
+                db.execute("""UPDATE prints SET date=?,part_name=?,printer=?,city=?,material=?,
+                    start_time=?,end_time=?,duration_min=?,material_g=?,status=?,device_model=?,
+                    filament_color=?,cost_time=?,ist_done=1 WHERE task_id=?""",
+                    (rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
+                     rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
+                     rec["color"],rec["cost"],tid))
+                upd_count+=1
             else:
-                dur=int((t.get("costTime") or 0))//60
-                if dur>1440 or dur<0: dur=0
-            if dur<5 and t.get("costTime"):
-                cd=int((t.get("costTime") or 0))//60
-                if 5<=cd<=1440: dur=cd
-            printer=t.get("deviceName","Unknown")
-            city=acc["city_override"] or PRINTER_CITY.get(printer.strip(),"Unknown")
-            status=STATUS_MAP.get(int(t.get("status") or 0),str(t.get("status","")))
-            if status=="Queued" and et: status="Completed"
-            if status=="In Process" and et:
-                if (datetime.utcnow()-et).total_seconds()>300: status="Completed"
-            st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
-            et_ist=et.replace(tzinfo=timezone.utc).astimezone(IST) if et else None
-            if st_ist and et_ist and st_ist==et_ist and dur>0:
-                et_ist=st_ist+timedelta(minutes=dur)
-            device_model=t.get("deviceModel",""); fil_color=""
-            try:
-                ams=t.get("amsDetailMapping") or []
-                if isinstance(ams,list) and ams and isinstance(ams[0],dict):
-                    fil_color=ams[0].get("sourceColor","")[:6]
-            except: pass
-            db.execute("""INSERT OR IGNORE INTO prints
-                (task_id,date,part_name,printer,city,material,start_time,end_time,
-                 duration_min,material_g,status,device_model,filament_color,ist_done)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)""",
-                (tid,st_ist.strftime("%Y-%m-%d") if st_ist else "",
-                 t.get("title","Unknown"),printer,city,get_material(t),
-                 st_ist.strftime("%Y-%m-%d %H:%M") if st_ist else "",
-                 et_ist.strftime("%Y-%m-%d %H:%M") if et_ist else "",
-                 dur,round(float(t.get("weight") or 0),2),status,device_model,fil_color))
-            existing.add(tid); new_count+=1
+                db.execute("""INSERT OR IGNORE INTO prints
+                    (task_id,date,part_name,printer,city,material,start_time,end_time,
+                     duration_min,material_g,status,device_model,filament_color,ist_done,cost_time)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+                    (tid,rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
+                     rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
+                     rec["color"],rec["cost"]))
+                existing.add(tid); new_count+=1
     total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
     db.execute("INSERT INTO sync_log (synced_at,total_records,new_records,note) VALUES (?,?,?,?)",
-               (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),total,new_count,"OK"))
+               (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),total,new_count,f"upd:{upd_count}"))
     db.commit(); db.close()
-    print(f"[SYNC] Done +{new_count} | total {total}")
+    print(f"[SYNC] Done +{new_count} updated:{upd_count} | total {total}")
     startup_fixes()
     return new_count
 
@@ -266,7 +261,7 @@ def build_recent_html(rows, today):
     for row in rows:
         r=tuple(row)
         r_date=_html.escape(str(r[0] or "")); r_part=_html.escape(str(r[1] or "")); r_city=_html.escape(str(r[3] or ""))
-        r_mat=_html.escape(str(r[4] or "")); r_dur=int(r[5] or 0); r_matg=r[6] or 0
+        r_dur=int(r[5] or 0); r_matg=r[6] or 0
         r_status=_html.escape(str(r[7] or "")); r_st=str(r[8] or ""); r_et=str(r[9] or "")
         st_hm=r_st[11:16] if len(r_st)>10 else "-"
         et_hm=r_et[11:16] if len(r_et)>10 else "-"
@@ -275,13 +270,13 @@ def build_recent_html(rows, today):
         if r_status=="In Process":   et_cell="<span style='color:#f59e0b'>Live</span>"
         elif et_hm!="-":             et_cell=et_hm
         else:                        et_cell="-"
-        if r_status=="Completed":    badge="<span class='badge b-completed'>✓ Done</span>"
-        elif r_status=="Failed":     badge="<span class='badge b-failed'>✗ Failed</span>"
+        if r_status=="Completed":    badge="<span class='badge b-completed'>&#10003; Done</span>"
+        elif r_status=="Failed":     badge="<span class='badge b-failed'>&#10007; Failed</span>"
         elif r_status=="In Process": badge="<span class='badge b-printing' style='background:#f59e0b;color:#fff'>In Process</span>"
         elif r_status=="Cancelled":  badge="<span class='badge b-cancelled'>Cancelled</span>"
-        elif r_status=="Queued":     badge="<span class='badge b-queued'>⏳ Queued</span>"
+        elif r_status=="Queued":     badge="<span class='badge b-queued'>&#9203; Queued</span>"
         else:                        badge=f"<span class='badge b-cancelled'>{r_status}</span>"
-        dot="<span style='color:#f59e0b'>● </span>" if r_status=="In Process" else ""
+        dot="<span style='color:#f59e0b'>&#9679; </span>" if r_status=="In Process" else ""
         rs="style='background:rgba(245,158,11,0.08)'" if r_status=="In Process" else ""
         html+=(f"<tr {rs}><td class='mono'>{r_date}</td>"
                f"<td class='td-part' title='{r_part}'>{dot}{r_part}</td>"
@@ -305,7 +300,7 @@ def build_daily_html(db, today):
             else:   cells+="<td class='mono' style='color:#d1d5db'>-</td>"
         rs=f"style='background:rgba(233,30,99,0.07);font-weight:700'" if d==today else ""
         ds=f"style='color:#e91e63'" if d==today else ""
-        dot=" ●" if d==today else ""
+        dot=" &#9679;" if d==today else ""
         html+=f"<tr {rs}><td class='mono' {ds}>{d}{dot}</td>{cells}<td class='mono' style='font-weight:700'>{total_p}</td><td class='mono' style='font-weight:700'>{round(total_h,1)}h</td><td class='mono'>{total_m}g</td></tr>"
     return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No data - click Sync Now</td></tr>"
 
@@ -356,7 +351,7 @@ def city_page(city):
     db=get_db(); today=date.today().strftime("%Y-%m-%d")
     ov=db.execute(f"""SELECT COUNT(*),
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
         {HOURS_SQL}/60.0,{MAT_SQL}/1000.0 FROM prints WHERE city=?""",(city,)).fetchone()
     td=db.execute(f"SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL} FROM prints WHERE city=? AND date=? AND status NOT IN ('Queued','Cancelled')",(city,today)).fetchone()
     rows=db.execute("SELECT date,part_name,printer,material,start_time,end_time,duration_min,material_g,status,device_model,filament_color FROM prints WHERE city=? ORDER BY date DESC,start_time DESC",(city,)).fetchall()
@@ -369,7 +364,7 @@ def monthly():
     db=get_db()
     rows=db.execute(f"""SELECT substr(date,1,7) as mo,city,COUNT(*),
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
         ROUND({HOURS_SQL}/60.0,1),ROUND({MAT_SQL}/1000.0,3)
         FROM prints WHERE date!='' GROUP BY mo,city ORDER BY mo DESC,city""").fetchall()
     from collections import defaultdict
@@ -434,33 +429,19 @@ def api_sync():
 
 @app.route('/api/raw')
 def api_raw():
-    """DIAGNOSTIC: shows REAL raw data from Bambu API.
-    Usage: /api/raw  (all) or /api/raw?city=Hyderabad"""
     want=request.args.get('city','')
     out={}
     for acc in ACCOUNTS:
         label=acc['label']; city=acc.get('city_override') or label
         if want and want.lower() not in (label.lower()+' '+str(city).lower()): continue
-        try:
-            tasks=fetch_tasks(acc['token'])
-        except Exception as e:
-            out[label]={"error":str(e)}; continue
+        try: tasks=fetch_tasks(acc['token'])
+        except Exception as e: out[label]={"error":str(e)}; continue
         dist={}
         for t in tasks:
-            s=str(t.get('status'))
-            dist[s]=dist.get(s,0)+1
-        sample=[]
-        for t in tasks[:20]:
-            sample.append({
-                "id":t.get("id"),
-                "title":t.get("title"),
-                "deviceName":t.get("deviceName"),
-                "status":t.get("status"),
-                "startTime":t.get("startTime"),
-                "endTime":t.get("endTime"),
-                "costTime":t.get("costTime"),
-                "weight":t.get("weight"),
-            })
+            s=str(t.get('status')); dist[s]=dist.get(s,0)+1
+        sample=[{"id":t.get("id"),"title":t.get("title"),"deviceName":t.get("deviceName"),
+                 "status":t.get("status"),"startTime":t.get("startTime"),"endTime":t.get("endTime"),
+                 "costTime":t.get("costTime"),"weight":t.get("weight")} for t in tasks[:20]]
         out[label]={"total_tasks":len(tasks),"status_distribution":dist,"sample":sample}
     return jsonify(out)
 
