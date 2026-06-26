@@ -1,5 +1,5 @@
-"""Spinny 3DP CRM — Cloud Edition. Real status: In Process / Completed / Failed"""
-import os, sqlite3, threading, time
+""Spinny 3DP CRM — Cloud Edition. Real status: In Process / Completed / Failed"""
+import os, sqlite3, threading, time, html as _html
 from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
 import requests
@@ -234,9 +234,9 @@ def build_recent_html(rows, today):
     html=""
     for row in rows:
         r=tuple(row)  # convert sqlite3.Row to plain tuple
-        r_date=str(r[0] or ""); r_part=str(r[1] or ""); r_city=str(r[3] or "")
-        r_mat=str(r[4] or ""); r_dur=int(r[5] or 0); r_matg=r[6] or 0
-        r_status=str(r[7] or ""); r_st=str(r[8] or ""); r_et=str(r[9] or "")
+        r_date=_html.escape(str(r[0] or "")); r_part=_html.escape(str(r[1] or "")); r_city=_html.escape(str(r[3] or ""))
+        r_mat=_html.escape(str(r[4] or "")); r_dur=int(r[5] or 0); r_matg=r[6] or 0
+        r_status=_html.escape(str(r[7] or "")); r_st=str(r[8] or ""); r_et=str(r[9] or "")
         st_hm=r_st[11:16] if len(r_st)>10 else "—"
         et_hm=r_et[11:16] if len(r_et)>10 else "—"
         cc=CITY_COLOR.get(r_city,"#999")
