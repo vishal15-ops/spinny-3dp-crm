@@ -418,10 +418,61 @@ def dashboard():
             (today,)).fetchone()[0]
     }
  
-    recent = db.execute("""
+    recent_rows = db.execute("""
         SELECT date,part_name,printer,city,material,duration_min,material_g,status,start_time,end_time
         FROM prints WHERE date != '' ORDER BY date DESC, start_time DESC LIMIT 25
     """).fetchall()
+    # Pre-build HTML to avoid Jinja2 loop variable bug on Python 3.14
+    recent_html = ""
+    for row in recent_rows:
+        r_date, r_part, r_printer, r_city, r_mat, r_dur, r_matg, r_status, r_st, r_et = (
+            row[0] or "", row[1] or "", row[2] or "", row[3] or "",
+            row[4] or "", row[5] or 0, row[6] or 0, row[7] or "", row[8] or "", row[9] or ""
+        )
+        st_hm = r_st[11:16] if r_st and len(r_st) > 10 else "—"
+        et_hm = r_et[11:16] if r_et and len(r_et) > 10 else "—"
+        city_color = CITY_COLOR.get(r_city, "#999")
+        # Duration
+        if r_dur and int(r_dur) > 0:
+            d = int(r_dur)
+            dur_str = f"{d//60}h {d%60}m" if d >= 60 else f"{d}m"
+        else:
+            dur_str = "—"
+        # End time / Live
+        if r_status == "In Process":
+            et_cell = "<span style='color:#f59e0b'>Live</span>"
+        elif et_hm != "—":
+            et_cell = et_hm
+        else:
+            et_cell = "—"
+        # Status badge
+        if r_status == "Completed":
+            badge = "<span class='badge b-completed'>✓ Done</span>"
+        elif r_status == "Failed":
+            badge = "<span class='badge b-failed'>✗ Failed</span>"
+        elif r_status == "In Process":
+            badge = "<span class='badge b-printing' style='background:#f59e0b;color:#fff'>In Process</span>"
+        elif r_status == "Cancelled":
+            badge = "<span class='badge b-cancelled'>Cancelled</span>"
+        else:
+            badge = f"<span class='badge b-cancelled'>{r_status}</span>"
+        # Part name with live dot
+        part_prefix = "<span style='color:#f59e0b'>● </span>" if r_status == "In Process" else ""
+        row_style = "style='background:rgba(245,158,11,0.08)'" if r_status == "In Process" else ""
+        recent_html += (
+            f"<tr {row_style}>"
+            f"<td class='mono'>{r_date}</td>"
+            f"<td class='td-part' title='{r_part}'>{part_prefix}{r_part}</td>"
+            f"<td><span class='b-city' style='background:{city_color}'>{r_city}</span></td>"
+            f"<td class='mono' style='color:#1d4ed8;font-weight:600'>{st_hm}</td>"
+            f"<td class='mono' style='color:#7c3aed;font-weight:600'>{et_cell}</td>"
+            f"<td class='mono' style='font-weight:600'>{dur_str}</td>"
+            f"<td class='mono'>{r_matg}g</td>"
+            f"<td>{badge}</td>"
+            f"</tr>"
+        )
+    if not recent_html:
+        recent_html = "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No prints yet</td></tr>"
  
     # Daily summary — last 30 days, per city
     dates = db.execute(
@@ -479,7 +530,7 @@ def dashboard():
         total=total, completed=completed, failed=failed, in_proc=in_proc,
         hrs_total=round(hrs_total,1), mat_total=round(mat_total,2),
         cities_today=cities_today, today_total=today_total,
-        recent=recent, daily_rows_html=daily_rows_html,
+        recent_html=recent_html, daily_rows_html=daily_rows_html,
         last_sync=last_sync, today=today,
         city_color=CITY_COLOR, cities=CITIES,
         ord_city=ord_city, total_orders=len(orders),
