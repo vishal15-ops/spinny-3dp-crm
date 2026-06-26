@@ -154,6 +154,16 @@ def startup_fixes():
         db.execute("UPDATE prints SET city='Bangalore' WHERE city='Unknown' AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET city='Bangalore' WHERE city='Hyderabad' AND printer LIKE '%engaluru%'")
  
+        # Fix 3b: Queued with endTime → Completed (Bambu API bug)
+        db.execute(
+            "UPDATE prints SET status='Completed' WHERE status='Queued' "
+            "AND end_time IS NOT NULL AND end_time != '' AND LENGTH(end_time) > 5"
+        )
+        # Fix 3c: Queued old records (date < today, no endTime) → Completed
+        db.execute(
+            "UPDATE prints SET status='Completed' WHERE status='Queued' AND date < ?", (today,)
+        )
+ 
         # Fix 4: Unrealistic duration > 1440 min (24h) → 0
         r4 = db.execute("UPDATE prints SET duration_min=0 WHERE duration_min > 1440").rowcount
  
@@ -271,7 +281,15 @@ def do_sync():
         tasks = fetch_tasks(acc["token"])
         for t in tasks:
             tid = str(t.get("id",""))
-            if tid in existing: continue
+            if tid in existing:
+                # Re-check: if Bambu says In Process (status=2) with no endTime → update DB
+                bambu_st = int(t.get("status") or 0)
+                if bambu_st == 2:
+                    et_chk = parse_dt(t.get("endTime"))
+                    if not et_chk:
+                        # No endTime = genuinely currently printing
+                        db.execute("UPDATE prints SET status='In Process' WHERE task_id=? AND status != 'In Process'", (tid,))
+                continue
  
             st = parse_dt(t.get("startTime"))
             et = parse_dt(t.get("endTime"))
@@ -371,18 +389,18 @@ def dashboard():
     completed = db.execute("SELECT COUNT(*) FROM prints WHERE status='Completed'").fetchone()[0]
     failed    = db.execute("SELECT COUNT(*) FROM prints WHERE status IN ('Failed','Cancelled')").fetchone()[0]
     in_proc   = db.execute("SELECT COUNT(*) FROM prints WHERE status='In Process'").fetchone()[0]
-    hrs_total = db.execute("SELECT COALESCE(SUM(duration_min),0)/60.0 FROM prints").fetchone()[0]
+    hrs_total = db.execute("SELECT COALESCE(SUM(duration_min),0)/60.0 FROM prints WHERE status IN ('Completed','In Process','Failed')").fetchone()[0]
     mat_total = db.execute("SELECT COALESCE(SUM(material_g),0)/1000.0 FROM prints").fetchone()[0]
  
     cities_today = {}
     for c in CITIES:
         r = db.execute("""
             SELECT COUNT(*),
-                COALESCE(SUM(duration_min),0)/60.0,
-                COALESCE(SUM(material_g),0),
+                COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)/60.0,
+                COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN status='In Process' THEN 1 ELSE 0 END),0)
-            FROM prints WHERE city=? AND date=?""", (c, today)).fetchone()
+            FROM prints WHERE city=? AND date=? AND status NOT IN ('Queued','Cancelled')""", (c, today)).fetchone()
         cities_today[c] = {
             "prints": r[0], "hours": round(r[1],1),
             "mat_g": round(r[2],1), "ok": r[3], "live": r[4],
@@ -417,9 +435,9 @@ def dashboard():
         for cn in CITIES:
             r = db.execute("""
                 SELECT COUNT(*),
-                    COALESCE(ROUND(SUM(duration_min)/60.0,1),0),
-                    COALESCE(ROUND(SUM(material_g),0),0)
-                FROM prints WHERE date=? AND city=?""", (d, cn)).fetchone()
+                    COALESCE(ROUND(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END)/60.0,1),0),
+                    COALESCE(ROUND(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0),0)
+                FROM prints WHERE date=? AND city=? AND status NOT IN ('Queued','Cancelled')""", (d, cn)).fetchone()
             p, h, m = r[0] or 0, float(r[1] or 0), int(r[2] or 0)
             city_row[cn] = {"parts": p, "hours": h, "mat_g": m}
             total_p += p; total_h += h; total_m += m
@@ -467,13 +485,15 @@ def city_page(city):
     ov = db.execute("""
         SELECT COUNT(*),
             COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(duration_min),0)/60.0,
-            COALESCE(SUM(material_g),0)/1000.0
+            COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+            COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)/60.0,
+            COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0)/1000.0
         FROM prints WHERE city=?""", (city,)).fetchone()
     td = db.execute("""
-        SELECT COUNT(*), COALESCE(SUM(duration_min),0)/60.0, COALESCE(SUM(material_g),0)
-        FROM prints WHERE city=? AND date=?""", (city, today)).fetchone()
+        SELECT COUNT(*),
+            COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)/60.0,
+            COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0)
+        FROM prints WHERE city=? AND date=? AND status NOT IN ('Queued','Cancelled')""", (city, today)).fetchone()
     rows = db.execute("""
         SELECT date,part_name,printer,material,start_time,end_time,
                duration_min,material_g,status,device_model,filament_color
@@ -491,8 +511,8 @@ def monthly():
             COUNT(*) as total,
             COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0) as done,
             COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0) as failed,
-            ROUND(COALESCE(SUM(duration_min),0)/60.0, 1) as hours,
-            ROUND(COALESCE(SUM(material_g),0)/1000.0, 3) as mat_kg
+            ROUND(COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)/60.0, 1) as hours,
+            ROUND(COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0)/1000.0, 3) as mat_kg
         FROM prints WHERE date!='' GROUP BY mo,city ORDER BY mo DESC,city
     """).fetchall()
  
