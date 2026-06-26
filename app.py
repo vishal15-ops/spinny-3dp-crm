@@ -3,12 +3,13 @@ import os, sqlite3, threading, time, html as _html
 from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
 import requests
- 
+from collections import defaultdict
+
 IST = timezone(timedelta(hours=5, minutes=30))
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, 'spinny_3dp.db')
- 
+
 ACCOUNTS = [
     {"label":"Pune_Blr_History","token":"AQAI_IPb10d_E9OJD-cxbBW7_CY_qw8T8Qv8yZ8AEuKBIt2YzYoYj2pgMz-APjAVScBFeNOAVV5425tx6GIte-g98L8_Fcm8hZgd7TlxxfdJzt5L1WnkA9urKvE3PfXKFH4ugqYFO34aJTaB","city_override":None},
     {"label":"Bangalore_New","token":"AQB3PWzBA4I5xpRQEx9x3X35oMnx2KNdD_Gh700Pw7tEdc0ek14YOpH8ByslcCwi-PcYCxcX1CDZc3G8W2rzBNwzXEVvywSTBOmJ-ZodyO8xy5F2OAX25SlDeZAlaojTxI7EiUD0yQsQvssw","city_override":"Bangalore"},
@@ -25,10 +26,10 @@ CITY_COLOR = {"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delh
 STATUS_MAP = {1:"Queued",2:"In Process",3:"Failed",4:"Completed",5:"Cancelled",6:"Failed"}
 API_URL  = "https://api.bambulab.com/v1/user-service/my/tasks"
 SHEETS_URL = os.environ.get("SHEETS_API_URL","")
- 
+
 _sheets = {"orders":[],"designs":[],"fetched_at":0}
 SHEETS_TTL = 1800
- 
+
 def fetch_sheets(force=False):
     global _sheets
     if not SHEETS_URL: return _sheets
@@ -39,10 +40,10 @@ def fetch_sheets(force=False):
             _sheets={"orders":d["data"].get("orders",[]),"designs":d["data"].get("designs",[]),"fetched_at":time.time()}
     except Exception as e: print(f"[SHEETS] {e}")
     return _sheets
- 
+
 def get_db():
     db=sqlite3.connect(DB_PATH); db.row_factory=sqlite3.Row; return db
- 
+
 def init_db():
     db=get_db()
     db.executescript("""
@@ -64,36 +65,70 @@ def init_db():
         try: db.execute(col)
         except: pass
     db.commit(); db.close()
- 
+
+def dedup_prints(db):
+    """One printer can run only ONE job at a time.
+    If two prints OVERLAP in time on the SAME printer -> phantom duplicate.
+    Keep one (priority: Completed > Failed > In Process > Queued)."""
+    rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min
+                       FROM prints
+                       WHERE start_time!='' AND end_time!='' AND LENGTH(end_time)>10
+                         AND printer NOT IN ('','Unknown')
+                         AND duration_min>0 AND duration_min<=1440
+                       ORDER BY printer,start_time""").fetchall()
+    by_printer=defaultdict(list)
+    for r in rows:
+        try:
+            st=datetime.strptime(r[2],"%Y-%m-%d %H:%M")
+            et=datetime.strptime(r[3],"%Y-%m-%d %H:%M")
+            if et<=st: continue
+            by_printer[r[1]].append({"id":r[0],"st":st,"et":et,"status":r[4]})
+        except: pass
+    rank={"Completed":4,"Failed":3,"In Process":2,"Queued":1}
+    to_del=set()
+    for printer,jobs in by_printer.items():
+        jobs.sort(key=lambda x:x["st"])
+        kept=[]
+        for j in jobs:
+            clash=None
+            for k in kept:
+                if j["st"]<k["et"] and k["st"]<j["et"]:   # time overlap
+                    clash=k; break
+            if clash:
+                jr=rank.get(j["status"],0); kr=rank.get(clash["status"],0)
+                if jr>kr:
+                    to_del.add(clash["id"]); kept.remove(clash); kept.append(j)
+                else:
+                    to_del.add(j["id"])
+            else:
+                kept.append(j)
+    for d in to_del:
+        db.execute("DELETE FROM prints WHERE id=?",(d,))
+    db.commit()
+    return len(to_del)
+
 def startup_fixes():
     if not os.path.exists(DB_PATH): return
     db=sqlite3.connect(DB_PATH)
     try:
         today=date.today().isoformat()
-        # Old In Process → Completed
         r1=db.execute("UPDATE prints SET status='Completed' WHERE status='In Process' AND date<?", (today,)).rowcount
         db.execute("UPDATE prints SET status='Completed' WHERE status='Printing' AND date<?", (today,))
-        # Today In Process + past endTime → Completed
         r2=db.execute("UPDATE prints SET status='Completed' WHERE status='In Process' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5 AND end_time<datetime('now','+5:30 hours','-10 minutes')").rowcount
         db.execute("UPDATE prints SET status='Completed' WHERE status='Printing' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5 AND end_time<datetime('now','+5:30 hours','-10 minutes')")
-        # Queued + endTime → Completed
         db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>5")
         db.execute("UPDATE prints SET status='Completed' WHERE status='Queued' AND date<?", (today,))
-        # City fixes
         r3=db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'").rowcount
         db.execute("UPDATE prints SET city='Bangalore' WHERE city='Unknown' AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET city='Bangalore' WHERE city='Hyderabad' AND printer LIKE '%engaluru%'")
-        # Duration cap
         r4=db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440").rowcount
         db.commit()
-        # Fix start==end + duration>0 → recalc end
         bad=db.execute("SELECT id,start_time,duration_min FROM prints WHERE start_time=end_time AND duration_min>0 AND start_time!=''").fetchall()
         for rec in bad:
             try:
                 st=datetime.strptime(rec[1],"%Y-%m-%d %H:%M")
                 db.execute("UPDATE prints SET end_time=? WHERE id=?", ((st+timedelta(minutes=rec[2])).strftime("%Y-%m-%d %H:%M"),rec[0]))
             except: pass
-        # UTC→IST migration
         utc=db.execute("SELECT id,start_time,end_time FROM prints WHERE (ist_done IS NULL OR ist_done=0) AND start_time!=''").fetchall()
         r6=0
         for rec in utc:
@@ -106,7 +141,6 @@ def startup_fixes():
                            (st.strftime("%Y-%m-%d %H:%M"),et,st.strftime("%Y-%m-%d"),rec[0]))
                 r6+=1
             except: pass
-        # Re-fix start==end after IST
         bad2=db.execute("SELECT id,start_time,duration_min FROM prints WHERE start_time=end_time AND duration_min>0 AND start_time!=''").fetchall()
         for rec in bad2:
             try:
@@ -114,10 +148,11 @@ def startup_fixes():
                 db.execute("UPDATE prints SET end_time=? WHERE id=?", ((st+timedelta(minutes=rec[2])).strftime("%Y-%m-%d %H:%M"),rec[0]))
             except: pass
         db.commit()
-        print(f"[AUTO-FIX] OldDone:{r1} EndFix:{r2} Blr:{r3} DurCap:{r4} IST:{r6}")
+        dn=dedup_prints(db)
+        print(f"[AUTO-FIX] OldDone:{r1} EndFix:{r2} Blr:{r3} DurCap:{r4} IST:{r6} Dedup:{dn}")
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
     finally: db.close()
- 
+
 def parse_dt(v):
     if not v: return None
     try:
@@ -127,7 +162,7 @@ def parse_dt(v):
         if iv>1e12: iv//=1000
         return datetime.fromtimestamp(iv) if iv>0 else None
     except: return None
- 
+
 def get_material(t):
     try:
         ams=t.get("amsDetailMapping") or []
@@ -139,7 +174,7 @@ def get_material(t):
         if ft: return ft
     except: pass
     return "ABS"
- 
+
 def fetch_tasks(token):
     s=requests.Session(); s.headers.update({"Authorization":f"Bearer {token}"})
     tasks,offset=[],0
@@ -155,7 +190,7 @@ def fetch_tasks(token):
         if len(tasks)>=data.get("total",0) or len(batch)<100: break
         offset+=100
     return tasks
- 
+
 def do_sync():
     print(f"[SYNC] {datetime.now().strftime('%H:%M:%S')}")
     db=get_db()
@@ -166,7 +201,6 @@ def do_sync():
         for t in tasks:
             tid=str(t.get("id",""))
             if tid in existing:
-                # Re-check: Bambu says In Process + no endTime → update DB
                 if int(t.get("status") or 0)==2 and not parse_dt(t.get("endTime")):
                     db.execute("UPDATE prints SET status='In Process' WHERE task_id=? AND status!='In Process'",(tid,))
                 continue
@@ -183,9 +217,7 @@ def do_sync():
             printer=t.get("deviceName","Unknown")
             city=acc["city_override"] or PRINTER_CITY.get(printer.strip(),"Unknown")
             status=STATUS_MAP.get(int(t.get("status") or 0),str(t.get("status","")))
-            # Queued + endTime → Completed
             if status=="Queued" and et: status="Completed"
-            # In Process + endTime 5min+ ago → Completed
             if status=="In Process" and et:
                 if (datetime.utcnow()-et).total_seconds()>300: status="Completed"
             st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
@@ -215,7 +247,7 @@ def do_sync():
     print(f"[SYNC] Done +{new_count} | total {total}")
     startup_fixes()
     return new_count
- 
+
 def auto_sync_loop():
     try: do_sync()
     except Exception as e: print(f"[SYNC] Startup error: {e}")
@@ -225,29 +257,29 @@ def auto_sync_loop():
         time.sleep(7200)
         try: do_sync()
         except Exception as e: print(f"[SYNC] Error: {e}")
- 
-# ── HELPERS ────────────────────────────────────────────────────────────────────
+
 HOURS_SQL = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)"
 MAT_SQL   = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0)"
- 
+
 def build_recent_html(rows, today):
     html=""
     for row in rows:
-        r=tuple(row)  # convert sqlite3.Row to plain tuple
+        r=tuple(row)
         r_date=_html.escape(str(r[0] or "")); r_part=_html.escape(str(r[1] or "")); r_city=_html.escape(str(r[3] or ""))
         r_mat=_html.escape(str(r[4] or "")); r_dur=int(r[5] or 0); r_matg=r[6] or 0
         r_status=_html.escape(str(r[7] or "")); r_st=str(r[8] or ""); r_et=str(r[9] or "")
-        st_hm=r_st[11:16] if len(r_st)>10 else "—"
-        et_hm=r_et[11:16] if len(r_et)>10 else "—"
+        st_hm=r_st[11:16] if len(r_st)>10 else "-"
+        et_hm=r_et[11:16] if len(r_et)>10 else "-"
         cc=CITY_COLOR.get(r_city,"#999")
-        dur_str=(f"{r_dur//60}h {r_dur%60}m" if r_dur>=60 else f"{r_dur}m") if r_dur>0 else "—"
+        dur_str=(f"{r_dur//60}h {r_dur%60}m" if r_dur>=60 else f"{r_dur}m") if r_dur>0 else "-"
         if r_status=="In Process":   et_cell="<span style='color:#f59e0b'>Live</span>"
-        elif et_hm!="—":             et_cell=et_hm
-        else:                        et_cell="—"
+        elif et_hm!="-":             et_cell=et_hm
+        else:                        et_cell="-"
         if r_status=="Completed":    badge="<span class='badge b-completed'>✓ Done</span>"
         elif r_status=="Failed":     badge="<span class='badge b-failed'>✗ Failed</span>"
         elif r_status=="In Process": badge="<span class='badge b-printing' style='background:#f59e0b;color:#fff'>In Process</span>"
         elif r_status=="Cancelled":  badge="<span class='badge b-cancelled'>Cancelled</span>"
+        elif r_status=="Queued":     badge="<span class='badge b-queued'>⏳ Queued</span>"
         else:                        badge=f"<span class='badge b-cancelled'>{r_status}</span>"
         dot="<span style='color:#f59e0b'>● </span>" if r_status=="In Process" else ""
         rs="style='background:rgba(245,158,11,0.08)'" if r_status=="In Process" else ""
@@ -259,7 +291,7 @@ def build_recent_html(rows, today):
                f"<td class='mono' style='font-weight:600'>{dur_str}</td>"
                f"<td class='mono'>{r_matg}g</td><td>{badge}</td></tr>")
     return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No prints yet</td></tr>"
- 
+
 def build_daily_html(db, today):
     dates=db.execute("SELECT DISTINCT date FROM prints WHERE date!='' ORDER BY date DESC LIMIT 30").fetchall()
     html=""; cc={"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delhi":"#43A047"}
@@ -270,14 +302,13 @@ def build_daily_html(db, today):
             p,h,m=int(r[0] or 0),float(r[1] or 0),int(r[2] or 0)
             total_p+=p; total_h+=h; total_m+=m
             if p>0: cells+=f"<td class='mono'><span style='color:{cc[cn]};font-weight:600'>{p}</span> <span style='font-size:11px;color:#9ca3af'>({h}h)</span></td>"
-            else:   cells+="<td class='mono' style='color:#d1d5db'>—</td>"
+            else:   cells+="<td class='mono' style='color:#d1d5db'>-</td>"
         rs=f"style='background:rgba(233,30,99,0.07);font-weight:700'" if d==today else ""
         ds=f"style='color:#e91e63'" if d==today else ""
         dot=" ●" if d==today else ""
         html+=f"<tr {rs}><td class='mono' {ds}>{d}{dot}</td>{cells}<td class='mono' style='font-weight:700'>{total_p}</td><td class='mono' style='font-weight:700'>{round(total_h,1)}h</td><td class='mono'>{total_m}g</td></tr>"
-    return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No data — click Sync Now</td></tr>"
- 
-# ── ROUTES ─────────────────────────────────────────────────────────────────────
+    return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No data - click Sync Now</td></tr>"
+
 @app.route('/')
 def dashboard():
     db=get_db(); today=date.today().strftime("%Y-%m-%d")
@@ -318,7 +349,7 @@ def dashboard():
         last_sync=last_sync,today=today,city_color=CITY_COLOR,cities=CITIES,
         ord_city=ord_city,total_orders=len(orders),
         today_designs=today_designs,month_designs=month_designs,total_designs=len(designs))
- 
+
 @app.route('/city/<city>')
 def city_page(city):
     if city not in CITIES: return redirect('/')
@@ -332,7 +363,7 @@ def city_page(city):
     db.close()
     return render_template('city.html',city=city,color=CITY_COLOR[city],
         ov=ov,td=td,rows=rows,today=today,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/monthly')
 def monthly():
     db=get_db()
@@ -350,7 +381,7 @@ def monthly():
         cd=md[mo]; months_list.append((mo,cd,sum(v["total"] for v in cd.values()),sum(v["done"] for v in cd.values()),sum(v["failed"] for v in cd.values()),round(sum(v["hours"] for v in cd.values()),1),round(sum(v["mat_kg"] for v in cd.values()),2)))
     db.close()
     return render_template('monthly.html',months_list=months_list,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/materials')
 def materials():
     db=get_db()
@@ -358,7 +389,7 @@ def materials():
     by_city=db.execute("SELECT city,material,COUNT(*),COALESCE(SUM(material_g),0)/1000.0 FROM prints GROUP BY city,material ORDER BY city,4 DESC").fetchall()
     db.close()
     return render_template('materials.html',top=top,by_city=by_city,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/fails')
 def fails():
     db=get_db()
@@ -366,7 +397,7 @@ def fails():
     top=db.execute("SELECT part_name,COUNT(*),city FROM prints WHERE status IN ('Failed','Cancelled') GROUP BY part_name ORDER BY 2 DESC LIMIT 20").fetchall()
     db.close()
     return render_template('fails.html',rows=rows,top=top,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/orders')
 def orders():
     data=fetch_sheets(force=False); all_orders=data.get("orders",[])
@@ -380,13 +411,13 @@ def orders():
         city_stats[c]={"total":len(co),"fulfilled":len([o for o in co if "fulfilled" in o.get("status","").lower()]),"pending":len([o for o in co if o.get("status","").lower() not in ["fulfilled","cancelled",""]]),"color":CITY_COLOR[c]}
     statuses=sorted(set(o.get("status","") for o in all_orders if o.get("status","")))
     return render_template('orders.html',orders=filtered,city_stats=city_stats,city_filter=cf,status_filter=sf,statuses=statuses,city_color=CITY_COLOR,cities=CITIES,total=len(all_orders))
- 
+
 @app.route('/designs')
 def designs():
     data=fetch_sheets(force=False); all_designs=data.get("designs",[])
     today_str=date.today().strftime("%Y-%m-%d")
     return render_template('designs.html',designs=all_designs,city_color=CITY_COLOR,cities=CITIES,today_count=len([d for d in all_designs if d.get("design_date","")==today_str]))
- 
+
 @app.route('/api/sheets_update',methods=['POST'])
 def sheets_update():
     global _sheets
@@ -395,12 +426,44 @@ def sheets_update():
         if p: _sheets={"orders":p.get("orders",[]),"designs":p.get("designs",[]),"fetched_at":time.time()}; return jsonify({"ok":True})
     except Exception as e: print(f"[SHEETS] Push error: {e}")
     return jsonify({"ok":False}),400
- 
+
 @app.route('/api/sync',methods=['GET','POST'])
 def api_sync():
     try: n=do_sync(); fetch_sheets(force=True); return jsonify({"ok":True,"new":n})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),500
- 
+
+@app.route('/api/raw')
+def api_raw():
+    """DIAGNOSTIC: shows REAL raw data from Bambu API.
+    Usage: /api/raw  (all) or /api/raw?city=Hyderabad"""
+    want=request.args.get('city','')
+    out={}
+    for acc in ACCOUNTS:
+        label=acc['label']; city=acc.get('city_override') or label
+        if want and want.lower() not in (label.lower()+' '+str(city).lower()): continue
+        try:
+            tasks=fetch_tasks(acc['token'])
+        except Exception as e:
+            out[label]={"error":str(e)}; continue
+        dist={}
+        for t in tasks:
+            s=str(t.get('status'))
+            dist[s]=dist.get(s,0)+1
+        sample=[]
+        for t in tasks[:20]:
+            sample.append({
+                "id":t.get("id"),
+                "title":t.get("title"),
+                "deviceName":t.get("deviceName"),
+                "status":t.get("status"),
+                "startTime":t.get("startTime"),
+                "endTime":t.get("endTime"),
+                "costTime":t.get("costTime"),
+                "weight":t.get("weight"),
+            })
+        out[label]={"total_tasks":len(tasks),"status_distribution":dist,"sample":sample}
+    return jsonify(out)
+
 @app.route('/api/health')
 def health():
     db=get_db(); total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
@@ -408,7 +471,7 @@ def health():
     ls=db.execute("SELECT synced_at FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     db.close()
     return jsonify({"status":"ok","total":total,"in_process":ip,"last_sync":ls[0] if ls else None})
- 
+
 init_db()
 startup_fixes()
 threading.Thread(target=auto_sync_loop,daemon=True).start()
