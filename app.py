@@ -36,7 +36,7 @@ def fetch_sheets(force=False):
     try:
         r = requests.get(SHEETS_URL,timeout=20); d=r.json()
         if d.get("ok"):
-            _sheets={"orders":d["data"].get("orders",[]),"designs":d["data"].get("designs",[]),"fetched_at":time.time()}
+            _sheets={"orders":d["data"].get("orders",[]),"designs":d["data"].get("designs",[]),"pendency":d["data"].get("pendency",[]),"fetched_at":time.time()}
     except Exception as e: print(f"[SHEETS] {e}")
     return _sheets
 
@@ -324,6 +324,7 @@ def dashboard():
     daily_rows_html=build_daily_html(db,today)
     last_sync=db.execute("SELECT synced_at,total_records FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     sheets=_sheets; orders=sheets.get("orders",[]); designs=sheets.get("designs",[])
+    pendency=sheets.get("pendency",[])
     ord_city={}
     for c in CITIES:
         co=[o for o in orders if o.get("order_city")==c]
@@ -338,7 +339,9 @@ def dashboard():
         recent_html=recent_html,daily_rows_html=daily_rows_html,
         last_sync=last_sync,today=today,city_color=CITY_COLOR,cities=CITIES,
         ord_city=ord_city,total_orders=len(orders),
-        today_designs=today_designs,month_designs=month_designs,total_designs=len(designs))
+        today_designs=today_designs,month_designs=month_designs,total_designs=len(designs),
+        total_pendency=len(pendency),
+        pendency_overdue=len([p for p in pendency if p.get("tat_over24","").lower()=="yes"]))
 
 @app.route('/city/<city>')
 def city_page(city):
@@ -415,7 +418,6 @@ def designs():
     data=fetch_sheets(force=False); all_designs=data.get("designs",[])
     today_str=date.today().strftime("%Y-%m-%d")
     today_limit=date.today().strftime("%Y-%m-%d")
-    # printed_date = primary reference
     all_designs=sorted(all_designs,key=lambda x:x.get("printed_date","") or x.get("design_date",""),reverse=True)
     today_list=[d for d in all_designs if d.get("printed_date","")==today_str]
     filter_today=request.args.get("filter","")
@@ -426,7 +428,6 @@ def designs():
         show_designs=[d for d in all_designs if d.get("printed_date","")==filter_date]
     else:
         show_designs=all_designs
-    # Daily summary by printed_date only, no future dates
     _daily=defaultdict(lambda:{c:0 for c in CITIES})
     for d in all_designs:
         dd=d.get("printed_date",""); dc=d.get("city","")
@@ -437,12 +438,38 @@ def designs():
         filter_today=filter_today,filter_date=filter_date,today_str=today_str,
         daily_summary=daily_summary)
 
+@app.route('/pendency')
+def pendency():
+    data=fetch_sheets(force=False)
+    all_p=data.get("pendency",[])
+    cf=request.args.get("city","All")
+    rf=request.args.get("remarks","All")
+    filtered=all_p
+    if cf!="All": filtered=[p for p in filtered if p.get("city","")==cf]
+    if rf=="pending": filtered=[p for p in filtered if not p.get("remarks_3dp","").strip()]
+    elif rf=="done": filtered=[p for p in filtered if p.get("remarks_3dp","").strip().lower() in ["done","done my side"]]
+    elif rf=="tomorrow": filtered=[p for p in filtered if "tomorrow" in p.get("remarks_3dp","").lower()]
+    elif rf=="not_possible": filtered=[p for p in filtered if "not possible" in p.get("remarks_3dp","").lower()]
+    all_cities=sorted(set(p.get("city","") for p in all_p if p.get("city","")))
+    city_stats={}
+    for c in all_cities:
+        cp=[p for p in all_p if p.get("city","")==c]
+        city_stats[c]={"total":len(cp),"pending":len([p for p in cp if not p.get("remarks_3dp","").strip()]),"done":len([p for p in cp if p.get("remarks_3dp","").strip().lower() in ["done","done my side"]]),"tat_over":len([p for p in cp if p.get("tat_over24","").lower()=="yes"])}
+    tat_over=len([p for p in all_p if p.get("tat_over24","").lower()=="yes"])
+    pending_count=len([p for p in all_p if not p.get("remarks_3dp","").strip()])
+    return render_template('pendency.html',pendency=filtered,all_count=len(all_p),
+        city_filter=cf,remarks_filter=rf,city_stats=city_stats,all_cities=all_cities,
+        tat_over=tat_over,pending_count=pending_count)
+
 @app.route('/api/sheets_update',methods=['POST'])
 def sheets_update():
     global _sheets
     try:
         p=request.get_json(force=True)
-if p: _sheets={"orders":p.get("orders",[]),"designs":p.get("designs",[]),"pendency":p.get("pendency",[]),"fetched_at":time.time()}; return jsonify({"ok":True})    except Exception as e: print(f"[SHEETS] Push error: {e}")
+        if p:
+            _sheets={"orders":p.get("orders",[]),"designs":p.get("designs",[]),"pendency":p.get("pendency",[]),"fetched_at":time.time()}
+            return jsonify({"ok":True})
+    except Exception as e: print(f"[SHEETS] Push error: {e}")
     return jsonify({"ok":False}),400
 
 @app.route('/api/sync',methods=['GET','POST'])
