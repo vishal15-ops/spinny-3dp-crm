@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% set active = 'pendency' %}
+{% block title %}Live Pendency{% endblock %}
+{% block content %}
+<div style="padding:24px">
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:22px;font-weight:700;margin:0 0 4px">📋 Live Pendency</h1>
+    <div style="color:#6b7280;font-size:13px">Daily Supply sheet — {{ all_count }} total parts</div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px">
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">📦 Total Parts</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ all_count }}</div>
+      <div style="font-size:11px;color:#9ca3af">All pending</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #f5950030;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#f59500;margin-bottom:8px">⏰ TAT &gt;24 Hrs</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ tat_over }}</div>
+      <div style="font-size:11px;color:#9ca3af">Overdue</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #ef444430;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#ef4444;margin-bottom:8px">⚠️ No Remarks</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ pending_count }}</div>
+      <div style="font-size:11px;color:#9ca3af">Action needed</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #16a34a30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#16a34a;margin-bottom:8px">🏙️ Cities</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ all_cities|length }}</div>
+      <div style="font-size:11px;color:#9ca3af">Active</div>
+    </div>
+  </div>
+  <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#374151">🏙️ City-wise Summary</div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#f9fafb">
+            <th style="text-align:left;padding:9px 14px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">City</th>
+            <th style="text-align:center;padding:9px 14px;color:#374151;font-weight:600;border-bottom:2px solid #e5e7eb">Total</th>
+            <th style="text-align:center;padding:9px 14px;color:#ef4444;font-weight:600;border-bottom:2px solid #e5e7eb">No Remarks</th>
+            <th style="text-align:center;padding:9px 14px;color:#16a34a;font-weight:600;border-bottom:2px solid #e5e7eb">Done</th>
+            <th style="text-align:center;padding:9px 14px;color:#f59500;font-weight:600;border-bottom:2px solid #e5e7eb">TAT &gt;24h</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for city, s in city_stats.items() %}
+          <tr style="border-bottom:1px solid #f3f4f6;cursor:pointer"
+            onclick="window.location='/pendency?city={{ city }}'"
+            onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+            <td style="padding:8px 14px;font-weight:600;color:#374151">{{ city }}</td>
+            <td style="text-align:center;padding:8px 14px;font-weight:700">{{ s.total }}</td>
+            <td style="text-align:center;padding:8px 14px">{% if s.pending > 0 %}<span style="color:#ef4444;font-weight:700">{{ s.pending }}</span>{% else %}<span style="color:#16a34a">✓</span>{% endif %}</td>
+            <td style="text-align:center;padding:8px 14px;color:#16a34a;font-weight:600">{{ s.done }}</td>
+            <td style="text-align:center;padding:8px 14px">{% if s.tat_over > 0 %}<span style="color:#f59500;font-weight:700">{{ s.tat_over }}</span>{% else %}<span style="color:#d1d5db">—</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="srch" placeholder="Search part, city, vehicle..."
+        style="flex:1;min-width:200px;padding:8px 14px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px"
+        oninput="filterTable()">
+      <form method="get" style="display:flex;gap:8px;flex-wrap:wrap">
+        <select name="city" onchange="this.form.submit()" style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff">
+          <option value="All" {% if city_filter=='All' %}selected{% endif %}>All Cities</option>
+          {% for c in all_cities %}<option value="{{ c }}" {% if city_filter==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select>
+        <select name="remarks" onchange="this.form.submit()" style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff">
+          <option value="All" {% if remarks_filter=='All' %}selected{% endif %}>All Remarks</option>
+          <option value="pending" {% if remarks_filter=='pending' %}selected{% endif %}>⚠️ No Remarks</option>
+          <option value="done" {% if remarks_filter=='done' %}selected{% endif %}>✅ Done</option>
+          <option value="tomorrow" {% if remarks_filter=='tomorrow' %}selected{% endif %}>🕐 By Tomorrow</option>
+          <option value="not_possible" {% if remarks_filter=='not_possible' %}selected{% endif %}>❌ Not Possible</option>
+        </select>
+        {% if city_filter != 'All' or remarks_filter != 'All' %}
+        <a href="/pendency" style="padding:8px 12px;background:#f3f4f6;border-radius:8px;font-size:13px;text-decoration:none;color:#374151">✕ Clear</a>
+        {% endif %}
+      </form>
+      <span style="color:#9ca3af;font-size:13px">{{ pendency|length }} records</span>
+    </div>
+    {% if not pendency %}
+    <div style="text-align:center;padding:48px;color:#9ca3af">
+      <div style="font-size:32px;margin-bottom:8px">📋</div>
+      <div>No pendency data. Click Sync Now to refresh.</div>
+    </div>
+    {% else %}
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:#f9fafb">
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">City</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Part Name</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Part Number</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Vehicle</th>
+            <th style="text-align:center;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">TAT</th>
+            <th style="text-align:center;padding:8px 10px;color:#f59500;font-weight:600;border-bottom:1px solid #e5e7eb">&gt;24h</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Status</th>
+            <th style="text-align:left;padding:8px 10px;color:#e91e8c;font-weight:700;border-bottom:1px solid #e5e7eb">3DP Remarks</th>
+          </tr>
+        </thead>
+        <tbody id="pBody">
+          {% for p in pendency %}
+          {% set rl = p.remarks_3dp.lower() %}
+          {% set is_done = rl in ['done','done my side'] %}
+          {% set is_pending = not p.remarks_3dp.strip() %}
+          {% set is_overdue = p.tat_over24.lower() == 'yes' %}
+          <tr style="border-bottom:1px solid #f3f4f6;{% if is_pending and is_overdue %}background:rgba(239,68,68,0.04);{% endif %}"
+            onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='{% if is_pending and is_overdue %}rgba(239,68,68,0.04){% endif %}'">
+            <td style="padding:8px 10px;font-weight:600;color:#374151;white-space:nowrap">{{ p.city }}</td>
+            <td style="padding:8px 10px;font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ p.part_name }}">{{ p.part_name }}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280;white-space:nowrap">{{ p.part_number }}</td>
+            <td style="padding:8px 10px;color:#374151;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ p.vehicle }}">{{ p.vehicle }}</td>
+            <td style="text-align:center;padding:8px 10px;font-weight:700;color:{% if is_overdue %}#ef4444{% else %}#374151{% endif %}">{{ p.tat_days }}</td>
+            <td style="text-align:center;padding:8px 10px">{% if is_overdue %}<span style="color:#ef4444;font-weight:700">Yes</span>{% else %}<span style="color:#d1d5db">No</span>{% endif %}</td>
+            <td style="padding:8px 10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:#6b7280" title="{{ p.part_status }}">{{ p.part_status }}</td>
+            <td style="padding:8px 10px;white-space:nowrap">
+              {% if is_done %}<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">✓ Done</span>
+              {% elif 'tomorrow' in rl %}<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">🕐 By Tomorrow</span>
+              {% elif 'not possible' in rl %}<span style="background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">❌ Not Possible</span>
+              {% elif p.remarks_3dp.strip() %}<span style="background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:10px;font-size:11px">{{ p.remarks_3dp }}</span>
+              {% else %}<span style="background:#fee2e2;color:#ef4444;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">⚠️ Pending</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+<script>
+function filterTable(){
+  var q=document.getElementById('srch').value.toLowerCase();
+  var rows=document.getElementById('pBody').getElementsByTagName('tr');
+  for(var i=0;i<rows.length;i++){rows[i].style.display=rows[i].textContent.toLowerCase().includes(q)?'':'none';}
+}
+</script>
+{% endblock %}
