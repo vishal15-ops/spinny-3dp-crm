@@ -417,10 +417,22 @@ def designs():
     all_designs=sorted(all_designs,key=lambda x:x.get("design_date",""),reverse=True)
     today_list=[d for d in all_designs if d.get("design_date","")==today_str]
     filter_today=request.args.get("filter","")
-    show_designs=today_list if filter_today=="today" else all_designs
+    filter_date=request.args.get("date","")
+    if filter_today=="today":
+        show_designs=today_list
+    elif filter_date:
+        show_designs=[d for d in all_designs if d.get("design_date","")==filter_date or d.get("printed_date","")==filter_date]
+    else:
+        show_designs=all_designs
+    _daily=defaultdict(lambda:{c:0 for c in CITIES})
+    for d in all_designs:
+        dd=d.get("design_date",""); dc=d.get("city","")
+        if dd and dc in CITIES: _daily[dd][dc]+=1
+    daily_summary=sorted(_daily.items(),key=lambda x:x[0],reverse=True)[:30]
     return render_template('designs.html',designs=show_designs,all_count=len(all_designs),
         city_color=CITY_COLOR,cities=CITIES,today_count=len(today_list),
-        filter_today=filter_today,today_str=today_str)
+        filter_today=filter_today,filter_date=filter_date,today_str=today_str,
+        daily_summary=daily_summary)
 
 @app.route('/api/sheets_update',methods=['POST'])
 def sheets_update():
