@@ -4,27 +4,44 @@
 {% block content %}
 <div style="padding:24px">
 
-  <div style="margin-bottom:24px">
-    <h1 style="font-size:22px;font-weight:700;margin:0 0 4px">✨ New Designs</h1>
-    <div style="color:#6b7280;font-size:13px">Parts not yet highlighted in Pan India sheet — {{ designs|length }} new designs</div>
+  <div style="margin-bottom:24px;display:flex;align-items:center;gap:12px">
+    <div>
+      <h1 style="font-size:22px;font-weight:700;margin:0 0 4px">✨ New Designs</h1>
+      <div style="color:#6b7280;font-size:13px">Parts not yet highlighted in Pan India sheet —
+        {% if filter_today == 'today' %}
+          <span style="color:#e91e8c;font-weight:600">Showing today's {{ designs|length }} designs</span>
+          <a href="/designs" style="margin-left:10px;font-size:12px;color:#6b7280;text-decoration:underline">← Show All</a>
+        {% else %}
+          {{ all_count }} total designs
+        {% endif %}
+      </div>
+    </div>
   </div>
 
+  <!-- Stat Cards -->
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px">
+
     <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
       <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">✨ Total New Designs</div>
-      <div style="font-size:28px;font-weight:800;color:#111">{{ designs|length }}</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ all_count }}</div>
       <div style="font-size:11px;color:#9ca3af">All time</div>
     </div>
-    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
-      <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">📅 Today's New Designs</div>
-      <div style="font-size:28px;font-weight:800;color:#111">{{ today_count }}</div>
-      <div style="font-size:11px;color:#9ca3af">Added today</div>
-    </div>
+
+    <!-- TODAY CARD — CLICKABLE -->
+    <a href="/designs?filter=today" style="text-decoration:none">
+      <div style="background:{% if filter_today=='today' %}rgba(233,30,140,0.08){% else %}#fff{% endif %};border-radius:12px;padding:20px;border:2px solid {% if filter_today=='today' %}#e91e8c{% else %}#e91e8c30{% endif %};box-shadow:0 1px 4px rgba(0,0,0,0.06);cursor:pointer;transition:all 0.2s">
+        <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">📅 Today's New Designs</div>
+        <div style="font-size:28px;font-weight:800;color:#111">{{ today_count }}</div>
+        <div style="font-size:11px;color:#9ca3af">{% if filter_today=='today' %}👆 Showing now{% else %}Click to view{% endif %}</div>
+      </div>
+    </a>
+
     <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
       <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">🏙️ With City Data</div>
       <div style="font-size:28px;font-weight:800;color:#111">{{ designs|selectattr('city')|list|length }}</div>
       <div style="font-size:11px;color:#9ca3af">City tagged</div>
     </div>
+
     <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
       <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">📦 Total Qty</div>
       <div style="font-size:28px;font-weight:800;color:#111">
@@ -36,6 +53,7 @@
     </div>
   </div>
 
+  <!-- Table -->
   <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
     <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
       <input type="text" id="srch" placeholder="Search part or vehicle..."
@@ -44,12 +62,18 @@
       <span style="color:#9ca3af;font-size:13px">{{ designs|length }} parts</span>
     </div>
 
-    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#374151">New Design Parts — Unhighlighted in Pan India sheet</div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#374151">
+      {% if filter_today == 'today' %}
+        📅 Today's New Design Parts
+      {% else %}
+        New Design Parts — Unhighlighted in Pan India sheet
+      {% endif %}
+    </div>
 
     {% if not designs %}
     <div style="text-align:center;padding:48px;color:#9ca3af">
       <div style="font-size:32px;margin-bottom:8px">✨</div>
-      <div>No new designs found.</div>
+      <div>{% if filter_today=='today' %}No new designs added today.{% else %}No designs found.{% endif %}</div>
     </div>
     {% else %}
     <div style="overflow-x:auto">
@@ -63,19 +87,23 @@
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Printed Date</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">City</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Material</th>
-            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Print Time</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Vehicle</th>
-            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Printed By</th>
+            <th style="text-align:left;padding:8px 10px;color:#e91e8c;font-weight:700;border-bottom:1px solid #e5e7eb">Printed By</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">File Name</th>
           </tr>
         </thead>
         <tbody id="dsnBody">
           {% for d in designs %}
-          <tr style="border-bottom:1px solid #f3f4f6" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+          {% set is_today = (d.design_date == today_str) %}
+          <tr style="border-bottom:1px solid #f3f4f6;{% if is_today %}background:rgba(233,30,140,0.03);{% endif %}"
+              onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background='{% if is_today %}rgba(233,30,140,0.03){% endif %}'">
             <td style="padding:8px 10px;color:#9ca3af;font-size:11px">{{ loop.index }}</td>
-            <td style="padding:8px 10px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.part_name }}">{{ d.part_name }}</td>
+            <td style="padding:8px 10px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.part_name }}">
+              {{ d.part_name }}
+              {% if is_today %}<span style="background:#e91e8c;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px;vertical-align:middle">NEW</span>{% endif %}
+            </td>
             <td style="padding:8px 10px;text-align:center;font-weight:700;color:#e91e8c">{{ d.qty or '—' }}</td>
-            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280">{{ d.design_date or '—' }}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:{% if is_today %}#e91e8c{% else %}#6b7280{% endif %};font-weight:{% if is_today %}700{% else %}400{% endif %}">{{ d.design_date or '—' }}</td>
             <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280">{{ d.printed_date or '—' }}</td>
             <td style="padding:8px 10px">
               {% if d.city %}
@@ -83,9 +111,10 @@
               {% else %}—{% endif %}
             </td>
             <td style="padding:8px 10px;color:#374151">{{ d.material or '—' }}</td>
-            <td style="padding:8px 10px;color:#374151">{{ d.print_time or '—' }}</td>
             <td style="padding:8px 10px;color:#374151;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.vehicle or '—' }}</td>
-            <td style="padding:8px 10px;color:#374151">{{ d.printed_by or '—' }}</td>
+            <td style="padding:8px 10px;font-weight:{% if is_today %}700{% else %}400{% endif %};color:{% if is_today %}#e91e8c{% else %}#374151{% endif %}">
+              {{ d.printed_by or '—' }}
+            </td>
             <td style="padding:8px 10px;color:#6b7280;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.file_name or '' }}">{{ d.file_name or '—' }}</td>
           </tr>
           {% endfor %}
