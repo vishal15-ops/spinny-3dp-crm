@@ -1,5 +1,5 @@
 """Spinny 3DP CRM - Cloud Edition. Real data from Bambu API, auto-cleaned."""
-import os, sqlite3, threading, time, html as _html
+import os, sqlite3, threading, time, html as _html, json as _json
 from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
 import requests
@@ -57,6 +57,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             synced_at TEXT, total_records INTEGER, new_records INTEGER, note TEXT);
+        CREATE TABLE IF NOT EXISTS sheets_cache (
+            key TEXT PRIMARY KEY, data TEXT, updated_at TEXT);
         CREATE INDEX IF NOT EXISTS idx_date ON prints(date);
         CREATE INDEX IF NOT EXISTS idx_city ON prints(city);""")
     for col in ["ALTER TABLE prints ADD COLUMN ist_done INTEGER DEFAULT 0",
@@ -66,6 +68,27 @@ def init_db():
         try: db.execute(col)
         except: pass
     db.commit(); db.close()
+
+def load_sheets_cache():
+    global _sheets
+    try:
+        db=sqlite3.connect(DB_PATH)
+        row=db.execute("SELECT data FROM sheets_cache WHERE key='sheets_data'").fetchone()
+        if row:
+            cached=_json.loads(row[0])
+            _sheets={"orders":cached.get("orders",[]),"designs":cached.get("designs",[]),"pendency":cached.get("pendency",[]),"fetched_at":time.time()}
+            print(f"[CACHE] Loaded {len(_sheets['orders'])} orders, {len(_sheets['designs'])} designs, {len(_sheets['pendency'])} pendency")
+        db.close()
+    except Exception as e: print(f"[CACHE] Load error: {e}")
+
+def save_sheets_cache():
+    try:
+        db=get_db()
+        db.execute("INSERT OR REPLACE INTO sheets_cache (key,data,updated_at) VALUES (?,?,?)",
+            ("sheets_data",_json.dumps({"orders":_sheets["orders"],"designs":_sheets["designs"],"pendency":_sheets["pendency"]}),
+            datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")))
+        db.commit(); db.close()
+    except Exception as e: print(f"[CACHE] Save error: {e}")
 
 def parse_dt(v):
     if not v: return None
@@ -248,8 +271,6 @@ def do_sync():
 def auto_sync_loop():
     try: do_sync()
     except Exception as e: print(f"[SYNC] Startup error: {e}")
-    try: fetch_sheets(force=True)
-    except: pass
     while True:
         time.sleep(7200)
         try: do_sync()
@@ -468,13 +489,14 @@ def sheets_update():
         p=request.get_json(force=True)
         if p:
             _sheets={"orders":p.get("orders",[]),"designs":p.get("designs",[]),"pendency":p.get("pendency",[]),"fetched_at":time.time()}
+            save_sheets_cache()
             return jsonify({"ok":True})
     except Exception as e: print(f"[SHEETS] Push error: {e}")
     return jsonify({"ok":False}),400
 
 @app.route('/api/sync',methods=['GET','POST'])
 def api_sync():
-    try: n=do_sync(); fetch_sheets(force=True); return jsonify({"ok":True,"new":n})
+    try: n=do_sync(); return jsonify({"ok":True,"new":n})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),500
 
 @app.route('/api/health')
@@ -486,6 +508,7 @@ def health():
     return jsonify({"status":"ok","total":total,"in_process":ip,"last_sync":ls[0] if ls else None})
 
 init_db()
+load_sheets_cache()
 startup_fixes()
 threading.Thread(target=auto_sync_loop,daemon=True).start()
 if __name__=='__main__':
