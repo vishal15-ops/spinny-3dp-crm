@@ -328,8 +328,8 @@ def dashboard():
     for c in CITIES:
         co=[o for o in orders if o.get("order_city")==c]
         ord_city[c]={"total":len(co),"fulfilled":len([o for o in co if "fulfilled" in o.get("status","").lower()]),"pending":len([o for o in co if o.get("status","").lower() not in ["fulfilled","cancelled",""]])}
-    today_designs=[d for d in designs if d.get("design_date","")==today]
-    month_designs=[d for d in designs if str(d.get("design_date","")).startswith(today[:7])]
+    today_designs=[d for d in designs if d.get("printed_date","")==today]
+    month_designs=[d for d in designs if str(d.get("printed_date","")).startswith(today[:7])]
     db.close()
     return render_template('dashboard.html',
         total=total,completed=completed,failed=failed,in_proc=in_proc,
@@ -414,20 +414,23 @@ def orders():
 def designs():
     data=fetch_sheets(force=False); all_designs=data.get("designs",[])
     today_str=date.today().strftime("%Y-%m-%d")
-    all_designs=sorted(all_designs,key=lambda x:x.get("design_date",""),reverse=True)
-    today_list=[d for d in all_designs if d.get("design_date","")==today_str]
+    today_limit=date.today().strftime("%Y-%m-%d")
+    # printed_date = primary reference
+    all_designs=sorted(all_designs,key=lambda x:x.get("printed_date","") or x.get("design_date",""),reverse=True)
+    today_list=[d for d in all_designs if d.get("printed_date","")==today_str]
     filter_today=request.args.get("filter","")
     filter_date=request.args.get("date","")
     if filter_today=="today":
         show_designs=today_list
     elif filter_date:
-        show_designs=[d for d in all_designs if d.get("design_date","")==filter_date or d.get("printed_date","")==filter_date]
+        show_designs=[d for d in all_designs if d.get("printed_date","")==filter_date]
     else:
         show_designs=all_designs
+    # Daily summary by printed_date only, no future dates
     _daily=defaultdict(lambda:{c:0 for c in CITIES})
     for d in all_designs:
-        dd=d.get("design_date",""); dc=d.get("city","")
-        if dd and dc in CITIES: _daily[dd][dc]+=1
+        dd=d.get("printed_date",""); dc=d.get("city","")
+        if dd and dd<=today_limit and dc in CITIES: _daily[dd][dc]+=1
     daily_summary=sorted(_daily.items(),key=lambda x:x[0],reverse=True)[:30]
     return render_template('designs.html',designs=show_designs,all_count=len(all_designs),
         city_color=CITY_COLOR,cities=CITIES,today_count=len(today_list),
