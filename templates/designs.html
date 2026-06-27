@@ -7,13 +7,13 @@
   <div style="margin-bottom:24px">
     <h1 style="font-size:22px;font-weight:700;margin:0 0 4px">✨ New Designs</h1>
     <div style="color:#6b7280;font-size:13px">
-      Pan India sheet — white rows (new designs) —
+      Pan India sheet — white rows — grouped by Printed Date —
       {% if filter_today=='today' %}
-        <span style="color:#e91e8c;font-weight:600">Aaj ke {{ designs|length }} designs</span>
-        <a href="/designs" style="margin-left:10px;font-size:12px;color:#6b7280;text-decoration:underline">← Sab dikhaao</a>
+        <span style="color:#e91e8c;font-weight:600">Today's {{ designs|length }} designs</span>
+        <a href="/designs" style="margin-left:10px;font-size:12px;color:#6b7280;text-decoration:underline">← Show All</a>
       {% elif filter_date %}
-        <span style="color:#e91e8c;font-weight:600">{{ filter_date }} ke {{ designs|length }} designs</span>
-        <a href="/designs" style="margin-left:10px;font-size:12px;color:#6b7280;text-decoration:underline">← Sab dikhaao</a>
+        <span style="color:#e91e8c;font-weight:600">{{ filter_date }} — {{ designs|length }} designs</span>
+        <a href="/designs" style="margin-left:10px;font-size:12px;color:#6b7280;text-decoration:underline">← Show All</a>
       {% else %}
         {{ all_count }} total designs
       {% endif %}
@@ -31,7 +31,7 @@
       <div style="background:{% if filter_today=='today' %}rgba(233,30,140,0.08){% else %}#fff{% endif %};border-radius:12px;padding:20px;border:2px solid {% if filter_today=='today' %}#e91e8c{% else %}#e91e8c30{% endif %};box-shadow:0 1px 4px rgba(0,0,0,0.06);cursor:pointer">
         <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">📅 Today's Designs</div>
         <div style="font-size:28px;font-weight:800;color:#111">{{ today_count }}</div>
-        <div style="font-size:11px;color:#9ca3af">{% if filter_today=='today' %}👆 Showing now{% else %}Click to view{% endif %}</div>
+        <div style="font-size:11px;color:#9ca3af">{% if filter_today=='today' %}Showing now{% else %}Click to view{% endif %}</div>
       </div>
     </a>
     <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
@@ -50,13 +50,13 @@
 
   <!-- Daily Summary -->
   <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
-    <div style="font-size:14px;font-weight:700;margin-bottom:6px;color:#374151">📅 Daily New Design Summary</div>
-    <div style="font-size:12px;color:#9ca3af;margin-bottom:14px">Kisi bhi row pe click karo → us din ki details neeche dikhegi</div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:4px;color:#374151">📅 Daily New Design Summary</div>
+    <div style="font-size:12px;color:#9ca3af;margin-bottom:14px">Based on Printed Date — Click any row to view details</div>
     <div style="overflow-x:auto">
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead>
           <tr style="background:#f9fafb">
-            <th style="text-align:left;padding:9px 14px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Date</th>
+            <th style="text-align:left;padding:9px 14px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Printed Date</th>
             {% for city in cities %}
             <th style="text-align:center;padding:9px 14px;color:{{ city_color[city] }};font-weight:700;border-bottom:2px solid #e5e7eb">{{ city }}</th>
             {% endfor %}
@@ -72,7 +72,7 @@
             onmouseover="this.style.background='rgba(233,30,140,0.07)'"
             onmouseout="this.style.background='{% if is_sel %}rgba(233,30,140,0.10){% elif is_today %}rgba(233,30,140,0.04){% else %}white{% endif %}'">
             <td style="padding:8px 14px;font-family:monospace;font-size:12px;font-weight:{% if is_today or is_sel %}700{% else %}400{% endif %};color:{% if is_today or is_sel %}#e91e8c{% else %}#374151{% endif %}">
-              {{ day }}{% if is_today %} ●{% endif %}{% if is_sel %} 👆{% endif %}
+              {{ day }}{% if is_today %} ●{% endif %}{% if is_sel %} ◀{% endif %}
             </td>
             {% set rt=namespace(v=0) %}
             {% for city in cities %}
@@ -109,15 +109,15 @@
       <span style="color:#9ca3af;font-size:13px">{{ designs|length }} parts</span>
     </div>
     <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#374151">
-      {% if filter_date %}📅 {{ filter_date }} ke New Designs
-      {% elif filter_today=='today' %}📅 Aaj ke New Designs
-      {% else %}Sab New Design Parts
+      {% if filter_date %}📅 Designs Printed on {{ filter_date }}
+      {% elif filter_today=='today' %}📅 Today's New Designs
+      {% else %}All New Design Parts
       {% endif %}
     </div>
     {% if not designs %}
     <div style="text-align:center;padding:48px;color:#9ca3af">
       <div style="font-size:32px;margin-bottom:8px">✨</div>
-      <div>Is date ke liye koi designs nahi.</div>
+      <div>No designs found for this date.</div>
     </div>
     {% else %}
     <div style="overflow-x:auto">
@@ -128,17 +128,17 @@
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Part Name</th>
             <th style="text-align:center;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Qty</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Design Date</th>
-            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Printed Date</th>
+            <th style="text-align:left;padding:8px 10px;color:#e91e8c;font-weight:700;border-bottom:1px solid #e5e7eb">Printed Date</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">City</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Material</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Vehicle</th>
-            <th style="text-align:left;padding:8px 10px;color:#e91e8c;font-weight:700;border-bottom:1px solid #e5e7eb">Printed By</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Printed By</th>
             <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">File Name</th>
           </tr>
         </thead>
         <tbody id="dsnBody">
           {% for d in designs %}
-          {% set is_today=(d.design_date==today_str) %}
+          {% set is_today=(d.printed_date==today_str) %}
           <tr style="border-bottom:1px solid #f3f4f6;{% if is_today %}background:rgba(233,30,140,0.03);{% endif %}"
             onmouseover="this.style.background='#f9fafb'"
             onmouseout="this.style.background='{% if is_today %}rgba(233,30,140,0.03){% endif %}'">
@@ -148,8 +148,8 @@
               {% if is_today %}<span style="background:#e91e8c;color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px">NEW</span>{% endif %}
             </td>
             <td style="padding:8px 10px;text-align:center;font-weight:700;color:#e91e8c">{{ d.qty or '—' }}</td>
-            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:{% if is_today %}#e91e8c{% else %}#6b7280{% endif %};font-weight:{% if is_today %}700{% else %}400{% endif %}">{{ d.design_date or '—' }}</td>
-            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280">{{ d.printed_date or '—' }}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280">{{ d.design_date or '—' }}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;font-weight:{% if is_today %}700{% else %}500{% endif %};color:{% if is_today %}#e91e8c{% else %}#374151{% endif %}">{{ d.printed_date or '—' }}</td>
             <td style="padding:8px 10px">
               {% if d.city %}<span style="background:{{ city_color.get(d.city,'#90A4AE') }};color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">{{ d.city }}</span>
               {% else %}—{% endif %}
