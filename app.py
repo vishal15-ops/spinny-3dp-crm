@@ -414,7 +414,13 @@ def orders():
 def designs():
     data=fetch_sheets(force=False); all_designs=data.get("designs",[])
     today_str=date.today().strftime("%Y-%m-%d")
-    return render_template('designs.html',designs=all_designs,city_color=CITY_COLOR,cities=CITIES,today_count=len([d for d in all_designs if d.get("design_date","")==today_str]))
+    all_designs=sorted(all_designs,key=lambda x:x.get("design_date",""),reverse=True)
+    today_list=[d for d in all_designs if d.get("design_date","")==today_str]
+    filter_today=request.args.get("filter","")
+    show_designs=today_list if filter_today=="today" else all_designs
+    return render_template('designs.html',designs=show_designs,all_count=len(all_designs),
+        city_color=CITY_COLOR,cities=CITIES,today_count=len(today_list),
+        filter_today=filter_today,today_str=today_str)
 
 @app.route('/api/sheets_update',methods=['POST'])
 def sheets_update():
