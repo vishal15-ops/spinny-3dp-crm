@@ -26,7 +26,7 @@ STATUS_MAP = {1:"Queued",2:"In Process",3:"Failed",4:"Completed",5:"Cancelled",6
 API_URL  = "https://api.bambulab.com/v1/user-service/my/tasks"
 SHEETS_URL = os.environ.get("SHEETS_API_URL","")
 
-_sheets = {"orders":[],"designs":[],"fetched_at":0}
+_sheets = {"orders":[],"designs":[],"pendency":[],"fetched_at":0}
 SHEETS_TTL = 1800
 
 def fetch_sheets(force=False):
@@ -442,8 +442,7 @@ def sheets_update():
     global _sheets
     try:
         p=request.get_json(force=True)
-        if p: _sheets={"orders":p.get("orders",[]),"designs":p.get("designs",[]),"fetched_at":time.time()}; return jsonify({"ok":True})
-    except Exception as e: print(f"[SHEETS] Push error: {e}")
+if p: _sheets={"orders":p.get("orders",[]),"designs":p.get("designs",[]),"pendency":p.get("pendency",[]),"fetched_at":time.time()}; return jsonify({"ok":True})    except Exception as e: print(f"[SHEETS] Push error: {e}")
     return jsonify({"ok":False}),400
 
 @app.route('/api/sync',methods=['GET','POST'])
