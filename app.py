@@ -22,7 +22,6 @@ PRINTER_CITY = {
 }
 CITIES = ["Pune","Bangalore","Hyderabad","Delhi"]
 CITY_COLOR = {"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delhi":"#43A047","Unknown":"#90A4AE"}
-# Bambu status: 1=Queued 2=In Process 3=Failed 4=Completed 5=Cancelled 6=Failed
 STATUS_MAP = {1:"Queued",2:"In Process",3:"Failed",4:"Completed",5:"Cancelled",6:"Failed"}
 API_URL  = "https://api.bambulab.com/v1/user-service/my/tasks"
 SHEETS_URL = os.environ.get("SHEETS_API_URL","")
@@ -91,7 +90,6 @@ def get_material(t):
     return "ABS"
 
 def compute_record(t, acc):
-    """Turn one raw Bambu task into clean fields. costTime = REAL print time."""
     st=parse_dt(t.get("startTime")); et=parse_dt(t.get("endTime"))
     cost=int(t.get("costTime") or 0)
     d_wall = int((et-st).total_seconds()/60) if (st and et and et>st) else 0
@@ -111,7 +109,7 @@ def compute_record(t, acc):
     if status=="Queued" and et:
         status="Completed"
     if status=="Cancelled":
-        status="Failed"   # aborted print counts as failed
+        status="Failed"
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -139,7 +137,6 @@ def compute_record(t, acc):
     }
 
 def dedup_prints(db):
-    """One printer = one job at a time. Overlapping prints on same printer -> phantom duplicate."""
     rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min
                        FROM prints
                        WHERE start_time!='' AND end_time!='' AND LENGTH(end_time)>10
@@ -180,8 +177,6 @@ def startup_fixes():
     if not os.path.exists(DB_PATH): return
     db=sqlite3.connect(DB_PATH)
     try:
-        today=date.today().isoformat()
-        # Normalize old data, then keep ONLY final results (Success/Failed)
         db.execute("UPDATE prints SET status='Failed' WHERE status='Cancelled'")
         db.execute("UPDATE prints SET status='Completed' WHERE status IN ('In Process','Printing','Queued') AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>10")
         db.execute("DELETE FROM prints WHERE status NOT IN ('Completed','Failed')")
@@ -222,7 +217,6 @@ def do_sync():
             if not tid: continue
             rec=compute_record(t, acc)
             if rec["status"] not in ("Completed","Failed"):
-                # Printing / Queued -> not final yet. Skip (and drop any stale copy).
                 if tid in existing:
                     db.execute("DELETE FROM prints WHERE task_id=?",(tid,))
                 continue
@@ -368,7 +362,6 @@ def monthly():
         COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
         ROUND({HOURS_SQL}/60.0,1),ROUND({MAT_SQL}/1000.0,3)
         FROM prints WHERE date!='' GROUP BY mo,city ORDER BY mo DESC,city""").fetchall()
-    from collections import defaultdict
     md=defaultdict(lambda:{c:{"total":0,"done":0,"failed":0,"hours":0,"mat_kg":0} for c in CITIES})
     for r in rows:
         if r[1] in CITIES: md[r[0]][r[1]]={"total":r[2],"done":r[3],"failed":r[4],"hours":r[5],"mat_kg":r[6]}
@@ -401,12 +394,21 @@ def orders():
     filtered=all_orders
     if cf!="All": filtered=[o for o in filtered if o.get("order_city")==cf or o.get("source_city")==cf]
     if sf!="All": filtered=[o for o in filtered if sf.lower() in o.get("status","").lower()]
+    filtered=sorted(filtered,key=lambda x:x.get("date",""),reverse=True)
     city_stats={}
     for c in CITIES:
         co=[o for o in all_orders if o.get("order_city")==c]
         city_stats[c]={"total":len(co),"fulfilled":len([o for o in co if "fulfilled" in o.get("status","").lower()]),"pending":len([o for o in co if o.get("status","").lower() not in ["fulfilled","cancelled",""]]),"color":CITY_COLOR[c]}
+    _daily=defaultdict(lambda:{c:0 for c in CITIES})
+    for o in all_orders:
+        d=o.get("date",""); oc=o.get("order_city","")
+        if d and oc in CITIES: _daily[d][oc]+=1
+    daily_summary=sorted(_daily.items(),key=lambda x:x[0],reverse=True)[:30]
+    today_date=date.today().strftime("%Y-%m-%d")
     statuses=sorted(set(o.get("status","") for o in all_orders if o.get("status","")))
-    return render_template('orders.html',orders=filtered,city_stats=city_stats,city_filter=cf,status_filter=sf,statuses=statuses,city_color=CITY_COLOR,cities=CITIES,total=len(all_orders))
+    return render_template('orders.html',orders=filtered,city_stats=city_stats,city_filter=cf,
+        status_filter=sf,statuses=statuses,city_color=CITY_COLOR,cities=CITIES,
+        total=len(all_orders),daily_summary=daily_summary,today_date=today_date)
 
 @app.route('/designs')
 def designs():
@@ -427,24 +429,6 @@ def sheets_update():
 def api_sync():
     try: n=do_sync(); fetch_sheets(force=True); return jsonify({"ok":True,"new":n})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),500
-
-@app.route('/api/raw')
-def api_raw():
-    want=request.args.get('city','')
-    out={}
-    for acc in ACCOUNTS:
-        label=acc['label']; city=acc.get('city_override') or label
-        if want and want.lower() not in (label.lower()+' '+str(city).lower()): continue
-        try: tasks=fetch_tasks(acc['token'])
-        except Exception as e: out[label]={"error":str(e)}; continue
-        dist={}
-        for t in tasks:
-            s=str(t.get('status')); dist[s]=dist.get(s,0)+1
-        sample=[{"id":t.get("id"),"title":t.get("title"),"deviceName":t.get("deviceName"),
-                 "status":t.get("status"),"startTime":t.get("startTime"),"endTime":t.get("endTime"),
-                 "costTime":t.get("costTime"),"weight":t.get("weight")} for t in tasks[:20]]
-        out[label]={"total_tasks":len(tasks),"status_distribution":dist,"sample":sample}
-    return jsonify(out)
 
 @app.route('/api/health')
 def health():
