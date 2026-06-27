@@ -1,22 +1,108 @@
-{% extends "base.html" %} {% set active = 'designs' %} {% block title %}New Designs{% endblock %} {% block content %}
-✨ New Designs
-Parts not yet highlighted in Pan India sheet — {{ designs|length }} new designs
-Total New Designs
-{{ designs|length }}
-All time
-Today's New Designs
-{{ today_count }}
-Added today
-With City Data
-{% set city_count = namespace(n=0) %} {% for d in designs %}{% if d.city %}{% set city_count.n = city_count.n + 1 %}{% endif %}{% endfor %} {{ city_count.n }}
-City tagged
-Total Qty
-{% set total_qty = namespace(n=0) %} {% for d in designs %}{% set total_qty.n = total_qty.n + d.qty %}{% endfor %} {{ total_qty.n }}
-Parts total
-Search part or vehicle...
- {{ designs|length }} parts
-New Design Parts Unhighlighted in Pan India sheet
-{% for d in designs %} {% endfor %}
-#	Part Name	Qty	Design Date	Printed Date	City	Material	Print Time	Vehicle	Printed By	File Name
-{{ loop.index }}	{{ d.part_name }}	{{ d.qty }}	{% if d.design_date %}{{ d.design_date }}{% else %}—{% endif %}	{% if d.printed_date %}{{ d.printed_date }}{% else %}—{% endif %}	{% if d.city %} {{ d.city }} {% else %}—{% endif %}	{{ d.material or '—' }}	{{ d.print_time or '—' }}	{{ d.vehicle or '—' }}	{{ d.printed_by or '—' }}	{{ d.file_name or '—' }}
+{% extends "base.html" %}
+{% set active = 'designs' %}
+{% block title %}New Designs{% endblock %}
+{% block content %}
+<div style="padding:24px">
+
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:22px;font-weight:700;margin:0 0 4px">✨ New Designs</h1>
+    <div style="color:#6b7280;font-size:13px">Parts not yet highlighted in Pan India sheet — {{ designs|length }} new designs</div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px">
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">✨ Total New Designs</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ designs|length }}</div>
+      <div style="font-size:11px;color:#9ca3af">All time</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">📅 Today's New Designs</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ today_count }}</div>
+      <div style="font-size:11px;color:#9ca3af">Added today</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">🏙️ With City Data</div>
+      <div style="font-size:28px;font-weight:800;color:#111">{{ designs|selectattr('city')|list|length }}</div>
+      <div style="font-size:11px;color:#9ca3af">City tagged</div>
+    </div>
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid #e91e8c30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:12px;font-weight:600;color:#e91e8c;margin-bottom:8px">📦 Total Qty</div>
+      <div style="font-size:28px;font-weight:800;color:#111">
+        {% set total_qty = namespace(n=0) %}
+        {% for d in designs %}{% set total_qty.n = total_qty.n + (d.qty|int(0)) %}{% endfor %}
+        {{ total_qty.n }}
+      </div>
+      <div style="font-size:11px;color:#9ca3af">Parts total</div>
+    </div>
+  </div>
+
+  <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
+      <input type="text" id="srch" placeholder="Search part or vehicle..."
+        style="flex:1;padding:8px 14px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px"
+        oninput="filterTable()">
+      <span style="color:#9ca3af;font-size:13px">{{ designs|length }} parts</span>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#374151">New Design Parts — Unhighlighted in Pan India sheet</div>
+
+    {% if not designs %}
+    <div style="text-align:center;padding:48px;color:#9ca3af">
+      <div style="font-size:32px;margin-bottom:8px">✨</div>
+      <div>No new designs found.</div>
+    </div>
+    {% else %}
+    <div style="overflow-x:auto">
+      <table id="dsnTbl" style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:#f9fafb">
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">#</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Part Name</th>
+            <th style="text-align:center;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Qty</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Design Date</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Printed Date</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">City</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Material</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Print Time</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Vehicle</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Printed By</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">File Name</th>
+          </tr>
+        </thead>
+        <tbody id="dsnBody">
+          {% for d in designs %}
+          <tr style="border-bottom:1px solid #f3f4f6" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+            <td style="padding:8px 10px;color:#9ca3af;font-size:11px">{{ loop.index }}</td>
+            <td style="padding:8px 10px;font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.part_name }}">{{ d.part_name }}</td>
+            <td style="padding:8px 10px;text-align:center;font-weight:700;color:#e91e8c">{{ d.qty or '—' }}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280">{{ d.design_date or '—' }}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280">{{ d.printed_date or '—' }}</td>
+            <td style="padding:8px 10px">
+              {% if d.city %}
+              <span style="background:{{ city_color.get(d.city,'#90A4AE') }};color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">{{ d.city }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td style="padding:8px 10px;color:#374151">{{ d.material or '—' }}</td>
+            <td style="padding:8px 10px;color:#374151">{{ d.print_time or '—' }}</td>
+            <td style="padding:8px 10px;color:#374151;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.vehicle or '—' }}</td>
+            <td style="padding:8px 10px;color:#374151">{{ d.printed_by or '—' }}</td>
+            <td style="padding:8px 10px;color:#6b7280;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ d.file_name or '' }}">{{ d.file_name or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+function filterTable(){
+  var q=document.getElementById('srch').value.toLowerCase();
+  var rows=document.getElementById('dsnBody').getElementsByTagName('tr');
+  for(var i=0;i<rows.length;i++){
+    rows[i].style.display=rows[i].textContent.toLowerCase().includes(q)?'':'none';
+  }
+}
+</script>
 {% endblock %}
