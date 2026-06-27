@@ -2,112 +2,171 @@
 {% set active = 'orders' %}
 {% block title %}Orders{% endblock %}
 {% block content %}
-<div class="page-header">
-  <div>
-    <div class="page-title">📋 Orders</div>
-    <div class="page-meta">City-wise order tracking — {{ total }} total orders</div>
+<div style="padding:24px">
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:22px;font-weight:700;margin:0 0 4px">📋 Orders</h1>
+    <div style="color:#6b7280;font-size:13px">City-wise order tracking — {{ total }} total orders</div>
   </div>
-</div>
 
-<!-- City Stats -->
-<div class="cards-row cards-4" style="margin-bottom:20px">
-  {% for city in cities %}
-  {% set s = city_stats[city] %}
-  <div class="city-card" style="border-top-color:{{ s.color }}">
-    <div class="city-card-name" style="color:{{ s.color }}">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ s.color }};margin-right:6px;vertical-align:middle"></span>{{ city }}
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px">
+    {% for city in cities %}{% set s = city_stats[city] %}
+    <div style="background:#fff;border-radius:12px;padding:20px;border:2px solid {{ city_color[city] }}30;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+      <div style="font-size:13px;font-weight:600;color:{{ city_color[city] }};margin-bottom:8px">● {{ city }}</div>
+      <div style="font-size:28px;font-weight:800;color:#111;line-height:1">{{ s.total }}</div>
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:10px">total orders</div>
+      <div style="font-size:12px;display:flex;gap:12px">
+        <span style="color:#16a34a;font-weight:600">✓ {{ s.fulfilled }}</span>
+        <span style="color:#f59e0b;font-weight:600">⏳ {{ s.pending }}</span>
+      </div>
     </div>
-    <div style="font-size:24px;font-weight:800">{{ s.total }}</div>
-    <div style="font-size:12px;color:#9ca3af;margin-top:4px">total orders</div>
-    <div style="margin-top:8px;display:flex;gap:12px;font-size:12px">
-      <span class="badge b-fulfilled">✓ {{ s.fulfilled }}</span>
-      <span class="badge b-pending">⏳ {{ s.pending }}</span>
+    {% endfor %}
+  </div>
+
+  <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="font-size:14px;font-weight:700;margin-bottom:14px;color:#374151">📅 Daily Order Summary</div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#f9fafb">
+            <th style="text-align:left;padding:9px 14px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Date</th>
+            {% for city in cities %}
+            <th style="text-align:center;padding:9px 14px;color:{{ city_color[city] }};font-weight:700;border-bottom:2px solid #e5e7eb">{{ city }}</th>
+            {% endfor %}
+            <th style="text-align:center;padding:9px 14px;color:#374151;font-weight:700;border-bottom:2px solid #e5e7eb">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for day, city_counts in daily_summary %}
+          {% set is_today = (day == today_date) %}
+          <tr style="border-bottom:1px solid #f3f4f6;{% if is_today %}background:rgba(233,30,99,0.04);{% endif %}">
+            <td style="padding:8px 14px;font-family:monospace;font-size:12px;font-weight:{% if is_today %}700{% else %}400{% endif %};color:{% if is_today %}#e91e63{% else %}#374151{% endif %}">
+              {{ day }}{% if is_today %} ●{% endif %}
+            </td>
+            {% set row_total = namespace(v=0) %}
+            {% for city in cities %}
+              {% set cnt = city_counts.get(city, 0) %}
+              {% set row_total.v = row_total.v + cnt %}
+              <td style="text-align:center;padding:8px 14px">
+                {% if cnt > 0 %}<span style="color:{{ city_color[city] }};font-weight:700">{{ cnt }}</span>
+                {% else %}<span style="color:#d1d5db">—</span>{% endif %}
+              </td>
+            {% endfor %}
+            <td style="text-align:center;padding:8px 14px;font-weight:700;color:#111">{{ row_total.v }}</td>
+          </tr>
+          {% endfor %}
+          <tr style="background:#f3f4f6;border-top:2px solid #e5e7eb">
+            <td style="padding:9px 14px;font-weight:700;color:#374151">Grand Total</td>
+            {% for city in cities %}
+            <td style="text-align:center;padding:9px 14px;font-weight:700;color:{{ city_color[city] }}">{{ city_stats[city].total }}</td>
+            {% endfor %}
+            <td style="text-align:center;padding:9px 14px;font-weight:800;color:#111;font-size:14px">{{ total }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </div>
-  {% endfor %}
-</div>
 
-<!-- Filters -->
-<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
-  <input class="search-input" id="searchInput" type="text" placeholder="Search part, car no, POC…" oninput="filterTable()">
-  <select class="filter-select" onchange="location.href='/orders?city='+this.value+'&status={{ status_filter }}'">
-    <option {% if city_filter=='All' %}selected{% endif %} value="All">All Cities</option>
-    {% for c in cities %}
-    <option value="{{ c }}" {% if city_filter==c %}selected{% endif %}>{{ c }}</option>
-    {% endfor %}
-  </select>
-  <select class="filter-select" onchange="location.href='/orders?city={{ city_filter }}&status='+this.value">
-    <option value="All" {% if status_filter=='All' %}selected{% endif %}>All Status</option>
-    {% for s in statuses %}
-    <option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>
-    {% endfor %}
-  </select>
-  <span id="rowCount" style="font-size:12px;color:#9ca3af">{{ orders|length }} records</span>
-</div>
+  <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
+      <input type="text" id="srch" placeholder="Search part, car no, POC…"
+        style="flex:1;min-width:200px;padding:8px 14px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px"
+        oninput="filterTable()">
+      <form method="get" style="display:flex;gap:8px;flex-wrap:wrap">
+        <select name="city" onchange="this.form.submit()"
+          style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff">
+          <option value="All" {% if city_filter=='All' %}selected{% endif %}>All Cities</option>
+          {% for city in cities %}
+          <option value="{{ city }}" {% if city_filter==city %}selected{% endif %}>{{ city }}</option>
+          {% endfor %}
+        </select>
+        <select name="status" onchange="this.form.submit()"
+          style="padding:8px 12px;border:1px solid #e5e7eb;border-radius:8px;font-size:13px;background:#fff">
+          <option value="All" {% if status_filter=='All' %}selected{% endif %}>All Status</option>
+          {% for s in statuses %}
+          <option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      <span style="color:#9ca3af;font-size:13px">{{ orders|length }} records</span>
+    </div>
 
-<!-- Table -->
-<div class="table-card">
-  <div class="table-card-header">
-    Order List
-    {% if city_filter != 'All' %}
-    <small>Filtered: {{ city_filter }}</small>
+    <div style="font-size:13px;font-weight:600;margin-bottom:12px;color:#374151">
+      Order List
+      {% if city_filter != 'All' %}
+      <span style="background:#e0e7ff;color:#3730a3;padding:2px 10px;border-radius:12px;font-size:11px;margin-left:8px">Filtered: {{ city_filter }}</span>
+      {% endif %}
+    </div>
+
+    {% if not orders %}
+    <div style="text-align:center;padding:48px;color:#9ca3af">
+      <div style="font-size:32px;margin-bottom:8px">📋</div>
+      <div>No orders found. Set up Google Sheets API to see orders.</div>
+    </div>
+    {% else %}
+    <div style="overflow-x:auto">
+      <table id="ordTbl" style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:#f9fafb">
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb;white-space:nowrap">Date</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Part Name</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Car No.</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Source City</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Order City</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">POC</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Status</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Design</th>
+            <th style="text-align:left;padding:8px 10px;color:#6b7280;font-weight:600;border-bottom:1px solid #e5e7eb">Remarks</th>
+          </tr>
+        </thead>
+        <tbody id="ordBody">
+          {% for o in orders %}
+          <tr style="border-bottom:1px solid #f3f4f6" onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;white-space:nowrap;color:#6b7280">{{ o.date }}</td>
+            <td style="padding:8px 10px;font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ o.part_name }}">{{ o.part_name }}</td>
+            <td style="padding:8px 10px;font-family:monospace;font-size:11px;color:#6b7280">{{ o.car_no }}</td>
+            <td style="padding:8px 10px">
+              <span style="background:{{ city_color.get(o.source_city,'#90A4AE') }};color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">{{ o.source_city }}</span>
+            </td>
+            <td style="padding:8px 10px">
+              <span style="background:{{ city_color.get(o.order_city,'#90A4AE') }};color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600">{{ o.order_city }}</span>
+            </td>
+            <td style="padding:8px 10px;color:#374151">{{ o.poc }}</td>
+            <td style="padding:8px 10px;white-space:nowrap">
+              {% if o.status %}
+                {% if 'fulfilled' in o.status.lower() %}
+                <span style="background:#dcfce7;color:#16a34a;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">✓ {{ o.status }}</span>
+                {% elif 'ship' in o.status.lower() %}
+                <span style="background:#dbeafe;color:#1d4ed8;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">🚚 {{ o.status }}</span>
+                {% else %}
+                <span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">⏳ {{ o.status }}</span>
+                {% endif %}
+              {% endif %}
+            </td>
+            <td style="padding:8px 10px;white-space:nowrap">
+              {% if o.design_type %}
+                {% if 'new' in o.design_type.lower() %}
+                <span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">✨ New</span>
+                {% else %}
+                <span style="background:#f3f4f6;color:#6b7280;padding:2px 8px;border-radius:10px;font-size:11px">{{ o.design_type }}</span>
+                {% endif %}
+              {% endif %}
+            </td>
+            <td style="padding:8px 10px;color:#6b7280;font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ o.remarks or '' }}">{{ o.remarks[:40] if o.remarks else '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% endif %}
   </div>
-  {% if not orders %}
-  <div style="padding:40px;text-align:center;color:#9ca3af">
-    <div style="font-size:32px">📋</div>
-    <div style="margin-top:8px">No orders found. Set up Google Sheets API to see orders.</div>
-  </div>
-  {% else %}
-  <table id="ordersTable">
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Part Name</th>
-        <th>Car No.</th>
-        <th>Source City</th>
-        <th>Order City</th>
-        <th>POC</th>
-        <th>Status</th>
-        <th>Design</th>
-        <th>Remarks</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for o in orders %}
-      <tr>
-        <td class="mono">{{ o.date }}</td>
-        <td class="td-part" title="{{ o.part_name }}">{{ o.part_name }}</td>
-        <td class="mono" style="font-size:11px">{{ o.car_no }}</td>
-        <td><span class="b-city" style="background:{{ city_color.get(o.source_city,'#90A4AE') }}">{{ o.source_city }}</span></td>
-        <td><span class="b-city" style="background:{{ city_color.get(o.order_city,'#90A4AE') }}">{{ o.order_city }}</span></td>
-        <td style="font-size:12px">{{ o.poc }}</td>
-        <td>
-          {% if 'fulfilled' in o.status.lower() %}<span class="badge b-fulfilled">✓ {{ o.status }}</span>
-          {% elif 'ship' in o.status.lower() %}<span class="badge b-printing">🚚 {{ o.status }}</span>
-          {% elif o.status %}<span class="badge b-pending">⏳ {{ o.status }}</span>
-          {% endif %}
-        </td>
-        <td>
-          {% if 'new' in o.design_type.lower() %}<span class="badge" style="background:#e3f2fd;color:#1565c0">✨ New</span>
-          {% elif o.design_type %}<span class="badge b-cancelled">{{ o.design_type }}</span>
-          {% endif %}
-        </td>
-        <td style="font-size:12px;color:#6b7280">{{ o.remarks[:40] if o.remarks else '' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% endif %}
 </div>
-
 <script>
 function filterTable(){
-  const q=document.getElementById('searchInput').value.toLowerCase();
-  const rows=document.querySelectorAll('#ordersTable tbody tr');
-  let n=0;
-  rows.forEach(r=>{const v=!q||r.textContent.toLowerCase().includes(q);r.style.display=v?'':'none';if(v)n++;});
-  document.getElementById('rowCount').textContent=n+' records';
+  var q=document.getElementById('srch').value.toLowerCase();
+  var rows=document.getElementById('ordBody').getElementsByTagName('tr');
+  for(var i=0;i<rows.length;i++){
+    rows[i].style.display=rows[i].textContent.toLowerCase().includes(q)?'':'none';
+  }
 }
 </script>
 {% endblock %}
