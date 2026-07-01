@@ -1,77 +1,129 @@
 {% extends "base.html" %}
 {% set active = 'materials' %}
 {% block title %}Materials{% endblock %}
-
 {% block content %}
-<div class="page-header">
-  <div class="page-title">Material Analysis</div>
-  <div class="page-meta">Filament usage across all cities</div>
-</div>
+<div style="padding:24px">
 
-<!-- Overall by material -->
-<div class="section-title">Overall Totals</div>
-<div class="table-card" style="margin-bottom:22px">
-  <div class="table-card-header">Total Usage per Material Type</div>
-  <table>
-    <thead>
-      <tr>
-        <th>Material</th>
-        <th>Total Parts</th>
-        <th>Total Weight (kg)</th>
-        <th>Share</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% set total_kg = top|sum(attribute=2) %}
-      {% for r in top %}
-      <tr>
-        <td><strong>{{ r[0] }}</strong></td>
-        <td class="mono">{{ r[1] }}</td>
-        <td class="mono">{{ "%.3f"|format(r[2]) }} kg</td>
-        <td>
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="width:{{ [r[2]/total_kg*120,120]|min|int }}px;height:6px;background:#e91e63;border-radius:3px"></div>
-            <span class="mono">{{ "%.0f"|format(r[2]/total_kg*100 if total_kg else 0) }}%</span>
-          </div>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+  <div style="margin-bottom:24px">
+    <h1 style="font-size:22px;font-weight:700;margin:0 0 4px">🧵 Materials Usage</h1>
+    <div style="color:#6b7280;font-size:13px">Filament consumption by city and month</div>
+  </div>
 
-<!-- By city -->
-<div class="section-title">Breakdown by City × Material</div>
-<div class="table-card">
-  <div class="table-card-header">City-wise Material Usage</div>
-  <table>
-    <thead>
-      <tr>
-        <th>City</th>
-        <th>Material</th>
-        <th>Parts</th>
-        <th>Weight (kg)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% set ns = namespace(cur_city='') %}
-      {% for r in by_city %}
-      {% if r[0] != ns.cur_city %}
-        {% set ns.cur_city = r[0] %}
-        <tr style="background:#f8f9fb">
-          <td colspan="4" style="padding:8px 14px;">
-            <span class="b-city" style="background:{{ city_color.get(r[0],'#999') }}">{{ r[0] }}</span>
-          </td>
-        </tr>
-      {% endif %}
-      <tr>
-        <td style="color:#9ca3af" class="mono">{{ r[0] }}</td>
-        <td><strong>{{ r[1] }}</strong></td>
-        <td class="mono">{{ r[2] }}</td>
-        <td class="mono">{{ "%.3f"|format(r[3]) }} kg</td>
-      </tr>
+  <!-- Month Tabs -->
+  <div style="display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap">
+    {% for mo in months_list %}
+    <a href="/materials?mo={{ mo }}" style="text-decoration:none">
+      <div style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+        background:{% if mo==sel_mo %}#e91e63{% else %}#fff{% endif %};
+        color:{% if mo==sel_mo %}#fff{% else %}#374151{% endif %};
+        border:2px solid {% if mo==sel_mo %}#e91e63{% else %}#e5e7eb{% endif %}">
+        {{ mo }}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <!-- Monthly City-wise Breakdown -->
+  {% set month_data = mdata.get(sel_mo, {}) %}
+  <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="font-size:14px;font-weight:700;margin-bottom:16px;color:#374151">
+      📅 {{ sel_mo }} — City-wise Filament Usage
+    </div>
+    {% if month_data %}
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px">
+        <thead>
+          <tr style="background:#f9fafb">
+            <th style="text-align:left;padding:10px 14px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">City</th>
+            {% for fn in filaments %}
+            <th style="text-align:center;padding:10px 8px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb;white-space:nowrap;font-size:11px">{{ fn }}</th>
+            {% endfor %}
+            <th style="text-align:center;padding:10px 14px;color:#374151;font-weight:700;border-bottom:2px solid #e5e7eb;white-space:nowrap">Total KG</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for city in cities %}
+          {% set city_data = month_data.get(city, {}) %}
+          {% set ct = namespace(kg=0.0) %}
+          {% for fn in filaments %}
+            {% set d = city_data.get(fn, {}) %}
+            {% set ct.kg = ct.kg + d.get('kg', 0) %}
+          {% endfor %}
+          <tr style="border-bottom:1px solid #f3f4f6"
+            onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+            <td style="padding:10px 14px">
+              <span style="background:{{ city_color[city] }};color:#fff;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">{{ city }}</span>
+            </td>
+            {% for fn in filaments %}
+            {% set d = city_data.get(fn, {}) %}
+            {% set kg = d.get('kg', 0) %}
+            {% set parts = d.get('parts', 0) %}
+            {% set failed = d.get('failed', 0) %}
+            <td style="text-align:center;padding:10px 8px">
+              {% if kg > 0 %}
+              <div style="font-weight:700;color:#111;font-size:13px">{{ "%.3f"|format(kg) }}<span style="font-size:10px;font-weight:400;color:#6b7280"> kg</span></div>
+              <div style="font-size:10px;color:#9ca3af">{{ parts }} parts</div>
+              {% if failed > 0 %}<div style="font-size:10px;color:#ef4444;font-weight:600">{{ failed }} ✗</div>{% endif %}
+              {% else %}<span style="color:#e5e7eb">—</span>{% endif %}
+            </td>
+            {% endfor %}
+            <td style="text-align:center;padding:10px 14px">
+              {% if ct.kg > 0 %}
+              <span style="font-weight:800;font-size:14px;color:{{ city_color[city] }}">{{ "%.3f"|format(ct.kg) }} kg</span>
+              {% else %}<span style="color:#d1d5db">—</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+
+          <!-- Month Total Row -->
+          <tr style="background:#f3f4f6;border-top:2px solid #e5e7eb">
+            <td style="padding:10px 14px;font-weight:700;color:#374151;font-size:13px">📦 Month Total</td>
+            {% set gt = namespace(kg=0.0) %}
+            {% for fn in filaments %}
+            {% set fnt = namespace(kg=0.0, parts=0, failed=0) %}
+            {% for city in cities %}
+              {% set d = month_data.get(city, {}).get(fn, {}) %}
+              {% set fnt.kg = fnt.kg + d.get('kg',0) %}
+              {% set fnt.parts = fnt.parts + d.get('parts',0) %}
+              {% set fnt.failed = fnt.failed + d.get('failed',0) %}
+            {% endfor %}
+            {% set gt.kg = gt.kg + fnt.kg %}
+            <td style="text-align:center;padding:10px 8px">
+              {% if fnt.kg > 0 %}
+              <div style="font-weight:700;color:#111;font-size:13px">{{ "%.3f"|format(fnt.kg) }}<span style="font-size:10px;font-weight:400;color:#6b7280"> kg</span></div>
+              <div style="font-size:10px;color:#9ca3af">{{ fnt.parts }} parts</div>
+              {% if fnt.failed > 0 %}<div style="font-size:10px;color:#ef4444;font-weight:600">{{ fnt.failed }} ✗</div>{% endif %}
+              {% else %}<span style="color:#e5e7eb">—</span>{% endif %}
+            </td>
+            {% endfor %}
+            <td style="text-align:center;padding:10px 14px;font-weight:800;font-size:16px;color:#e91e63">
+              {{ "%.3f"|format(gt.kg) }} kg
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="text-align:center;padding:40px;color:#9ca3af">No data for {{ sel_mo }}</div>
+    {% endif %}
+  </div>
+
+  <!-- All Time Summary -->
+  <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="font-size:14px;font-weight:700;margin-bottom:16px;color:#374151">📊 All Time Filament Usage</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      {% for fn, stats in top %}
+      <div style="background:#f9fafb;border-radius:10px;padding:16px;border:1px solid #e5e7eb">
+        <div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:10px">🧵 {{ fn }}</div>
+        <div style="font-size:24px;font-weight:800;color:#111;line-height:1">{{ "%.2f"|format(stats.kg) }}<span style="font-size:14px;font-weight:400;color:#6b7280"> kg</span></div>
+        <div style="font-size:12px;color:#6b7280;margin-top:6px">{{ stats.parts }} parts printed</div>
+        {% if stats.failed > 0 %}
+        <div style="font-size:11px;color:#ef4444;margin-top:4px;font-weight:600">{{ stats.failed }} failed prints</div>
+        {% endif %}
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+  </div>
+
 </div>
 {% endblock %}
