@@ -131,8 +131,6 @@ def compute_record(t, acc):
         status="Completed"
     if status=="Queued" and et:
         status="Completed"
-    if status=="Cancelled":
-        status="Failed"
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -174,7 +172,7 @@ def dedup_prints(db):
             if et<=st: continue
             by_printer[r[1]].append({"id":r[0],"st":st,"et":et,"status":r[4]})
         except: pass
-    rank={"Completed":4,"Failed":3,"In Process":2,"Queued":1}
+    rank={"Completed":5,"Failed":4,"Cancelled":3,"In Process":2,"Queued":1}
     to_del=set()
     for printer,jobs in by_printer.items():
         jobs.sort(key=lambda x:x["st"])
@@ -200,9 +198,8 @@ def startup_fixes():
     if not os.path.exists(DB_PATH): return
     db=sqlite3.connect(DB_PATH)
     try:
-        db.execute("UPDATE prints SET status='Failed' WHERE status='Cancelled'")
         db.execute("UPDATE prints SET status='Completed' WHERE status IN ('In Process','Printing','Queued') AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>10")
-        db.execute("DELETE FROM prints WHERE status NOT IN ('Completed','Failed')")
+        db.execute("DELETE FROM prints WHERE status NOT IN ('Completed','Failed','Cancelled')")
         db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'")
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
@@ -239,7 +236,7 @@ def do_sync():
             tid=str(t.get("id",""))
             if not tid: continue
             rec=compute_record(t, acc)
-            if rec["status"] not in ("Completed","Failed"):
+            if rec["status"] not in ("Completed","Failed","Cancelled"):
                 if tid in existing:
                     db.execute("DELETE FROM prints WHERE task_id=?",(tid,))
                 continue
@@ -293,6 +290,7 @@ def build_recent_html(rows, today):
         et_cell=et_hm if et_hm!="-" else "-"
         if r_status=="Completed":    badge="<span class='badge b-completed'>&#10003; Done</span>"
         elif r_status=="Failed":     badge="<span class='badge b-failed'>&#10007; Failed</span>"
+        elif r_status=="Cancelled":  badge="<span class='badge b-cancelled'>&#8856; Cancelled</span>"
         else:                        badge=f"<span class='badge b-cancelled'>{r_status}</span>"
         html+=(f"<tr><td class='mono'>{r_date}</td>"
                f"<td class='td-part' title='{r_part}'>{r_part}</td>"
@@ -325,7 +323,8 @@ def dashboard():
     db=get_db(); today=date.today().strftime("%Y-%m-%d")
     total    =db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
     completed=db.execute("SELECT COUNT(*) FROM prints WHERE status='Completed'").fetchone()[0]
-    failed   =db.execute("SELECT COUNT(*) FROM prints WHERE status IN ('Failed','Cancelled')").fetchone()[0]
+    failed   =db.execute("SELECT COUNT(*) FROM prints WHERE status='Failed'").fetchone()[0]
+    cancelled=db.execute("SELECT COUNT(*) FROM prints WHERE status='Cancelled'").fetchone()[0]
     in_proc  =db.execute("SELECT COUNT(*) FROM prints WHERE status='In Process'").fetchone()[0]
     hrs_total=db.execute(f"SELECT {HOURS_SQL}/60.0 FROM prints WHERE status IN ('Completed','In Process','Failed')").fetchone()[0]
     mat_total=db.execute(f"SELECT {MAT_SQL}/1000.0 FROM prints WHERE status IN ('Completed','In Process','Failed')").fetchone()[0]
@@ -339,7 +338,7 @@ def dashboard():
     today_total={"prints":sum(v["prints"] for v in cities_today.values()),"ok":sum(v["ok"] for v in cities_today.values()),
                  "live":sum(v["live"] for v in cities_today.values()),"hours":round(sum(v["hours"] for v in cities_today.values()),1),
                  "mat_g":round(sum(v["mat_g"] for v in cities_today.values()),1),
-                 "failed":db.execute("SELECT COUNT(*) FROM prints WHERE date=? AND status IN ('Failed','Cancelled')",(today,)).fetchone()[0]}
+                 "failed":db.execute("SELECT COUNT(*) FROM prints WHERE date=? AND status='Failed'",(today,)).fetchone()[0]}
     recent_rows=db.execute("SELECT date,part_name,printer,city,material,duration_min,material_g,status,start_time,end_time FROM prints WHERE date!='' ORDER BY date DESC,start_time DESC LIMIT 25").fetchall()
     recent_html=build_recent_html(recent_rows,today)
     daily_rows_html=build_daily_html(db,today)
@@ -354,7 +353,7 @@ def dashboard():
     month_designs=[d for d in designs if str(d.get("printed_date","")).startswith(today[:7])]
     db.close()
     return render_template('dashboard.html',
-        total=total,completed=completed,failed=failed,in_proc=in_proc,
+        total=total,completed=completed,failed=failed,cancelled=cancelled,in_proc=in_proc,
         hrs_total=round(float(hrs_total or 0),1),mat_total=round(float(mat_total or 0),2),
         cities_today=cities_today,today_total=today_total,
         recent_html=recent_html,daily_rows_html=daily_rows_html,
@@ -370,7 +369,7 @@ def city_page(city):
     db=get_db(); today=date.today().strftime("%Y-%m-%d")
     ov=db.execute(f"""SELECT COUNT(*),
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-        COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
         {HOURS_SQL}/60.0,{MAT_SQL}/1000.0 FROM prints WHERE city=?""",(city,)).fetchone()
     td=db.execute(f"SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL} FROM prints WHERE city=? AND date=?",(city,today)).fetchone()
     rows=db.execute("SELECT date,part_name,printer,material,start_time,end_time,duration_min,material_g,status,device_model,filament_color FROM prints WHERE city=? ORDER BY date DESC,start_time DESC",(city,)).fetchall()
@@ -383,7 +382,7 @@ def monthly():
     db=get_db()
     rows=db.execute(f"""SELECT substr(date,1,7) as mo,city,COUNT(*),
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-        COALESCE(SUM(CASE WHEN status IN ('Failed','Cancelled') THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
         ROUND({HOURS_SQL}/60.0,1),ROUND({MAT_SQL}/1000.0,3)
         FROM prints WHERE date!='' GROUP BY mo,city ORDER BY mo DESC,city""").fetchall()
     md=defaultdict(lambda:{c:{"total":0,"done":0,"failed":0,"hours":0,"mat_kg":0} for c in CITIES})
@@ -398,10 +397,61 @@ def monthly():
 @app.route('/materials')
 def materials():
     db=get_db()
-    top=db.execute("SELECT material,COUNT(*),COALESCE(SUM(material_g),0)/1000.0 FROM prints GROUP BY material ORDER BY 3 DESC").fetchall()
-    by_city=db.execute("SELECT city,material,COUNT(*),COALESCE(SUM(material_g),0)/1000.0 FROM prints GROUP BY city,material ORDER BY city,4 DESC").fetchall()
+
+    def fil_name(mat,col):
+        m=(mat or "").upper(); c=(col or "").lower().strip()
+        try:
+            rv=int(c[0:2],16); gv=int(c[2:4],16); bv=int(c[4:6],16)
+            white=(rv>200 and gv>200 and bv>200)
+        except: white=False
+        if "ABS" in m: return "eSun ABS+ "+("White" if white else "Black")
+        elif "PLA" in m: return "eSUN PLA+ "+("White" if white else "Black")
+        elif "TPU" in m: return "eSUN TPU-95A"
+        elif "PA" in m: return "eSUN ePA12"
+        return mat or "Unknown"
+
+    FILS=["eSun ABS+ Black","eSun ABS+ White","eSUN PLA+ Black","eSUN PLA+ White","eSUN TPU-95A","eSUN ePA12"]
+
+    raw=db.execute("""SELECT material,filament_color,COUNT(*),
+        COALESCE(SUM(material_g),0)/1000.0,
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
+        FROM prints WHERE status IN ('Completed','Failed') GROUP BY material,filament_color ORDER BY 4 DESC""").fetchall()
+    fil_total={}
+    for fn in FILS: fil_total[fn]={"parts":0,"kg":0.0,"failed":0}
+    fil_total["Other"]={"parts":0,"kg":0.0,"failed":0}
+    for r in raw:
+        fn=fil_name(r[0],r[1])
+        if fn not in fil_total: fn="Other"
+        fil_total[fn]["parts"]+=r[2]; fil_total[fn]["kg"]+=round(float(r[3]),3); fil_total[fn]["failed"]+=r[4]
+    top=[(k,v) for k,v in fil_total.items() if v["kg"]>0]
+    top.sort(key=lambda x:x[1]["kg"],reverse=True)
+
+    mraw=db.execute("""SELECT substr(date,1,7) as mo,city,material,filament_color,
+        COUNT(*),COALESCE(SUM(material_g),0)/1000.0,
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
+        FROM prints WHERE date!='' AND status IN ('Completed','Failed')
+        GROUP BY mo,city,material,filament_color ORDER BY 1 DESC,2,3""").fetchall()
+
+    months_set=set()
+    _mdata={}
+    for r in mraw:
+        mo,city,mat,col=r[0],r[1],r[2],r[3]
+        fn=fil_name(mat,col)
+        if fn not in FILS: fn="Other"
+        months_set.add(mo)
+        if mo not in _mdata: _mdata[mo]={}
+        if city not in _mdata[mo]: _mdata[mo][city]={}
+        if fn not in _mdata[mo][city]: _mdata[mo][city][fn]={"parts":0,"kg":0.0,"failed":0}
+        _mdata[mo][city][fn]["parts"]+=r[4]
+        _mdata[mo][city][fn]["kg"]+=round(float(r[5]),3)
+        _mdata[mo][city][fn]["failed"]+=r[6]
+
+    months_list=sorted(months_set,reverse=True)[:6]
+    sel_mo=request.args.get("mo",months_list[0] if months_list else "")
+
     db.close()
-    return render_template('materials.html',top=top,by_city=by_city,city_color=CITY_COLOR,cities=CITIES)
+    return render_template('materials.html',top=top,mdata=_mdata,months_list=months_list,
+        sel_mo=sel_mo,filaments=FILS,city_color=CITY_COLOR,cities=CITIES)
 
 @app.route('/fails')
 def fails():
