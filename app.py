@@ -1,4 +1,4 @@
-    """Spinny 3DP CRM - Cloud Edition. Real data from Bambu API, auto-cleaned."""
+"""Spinny 3DP CRM - Cloud Edition. Real data from Bambu API, auto-cleaned."""
 import os, sqlite3, threading, time, html as _html, json as _json
 from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
@@ -116,7 +116,6 @@ def save_sheets_cache():
         db.commit(); db.close()
     except Exception as e: print(f"[CACHE] Save error: {e}")
 
-# ================= GITHUB AUTO-BACKUP =================
 import hashlib, base64 as _b64
 GH_TOKEN=os.environ.get("GH_TOKEN","")
 GH_REPO=os.environ.get("GH_BACKUP_REPO","")
@@ -158,19 +157,16 @@ def do_backup(force=False):
         r=requests.put(url,headers=_gh_headers(),json=body,timeout=90)
         if r.status_code in (200,201):
             _backup_state={"last":now,"hash":h,"error":""}
-            print(f"[BACKUP] Saved to GitHub @ {now} ({len(data['prints'])} prints, {len(data['stock_txn'])} stock txns)")
             return True
-        _backup_state["error"]=f"GitHub API {r.status_code}"
-        print(f"[BACKUP] Failed: {r.status_code} {r.text[:200]}"); return False
+        _backup_state["error"]=f"GitHub API {r.status_code}"; return False
     except Exception as e:
-        _backup_state["error"]=str(e); print(f"[BACKUP] Error: {e}"); return False
+        _backup_state["error"]=str(e); return False
 
 def backup_async():
     threading.Thread(target=do_backup,daemon=True).start()
 
 def restore_from_github():
-    if not GH_TOKEN or not GH_REPO:
-        print("[RESTORE] Skipped — GH_TOKEN / GH_BACKUP_REPO not set"); return
+    if not GH_TOKEN or not GH_REPO: return
     try:
         db=get_db()
         pc=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
@@ -179,9 +175,8 @@ def restore_from_github():
         url=f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
         r=requests.get(url,headers=_gh_headers(raw=True),timeout=90)
         if r.status_code!=200:
-            db.close(); print(f"[RESTORE] No backup found ({r.status_code}) — fresh start"); return
+            db.close(); return
         d=_json.loads(r.text)
-        n_p=n_s=0
         if pc==0:
             for p in d.get("prints",[]):
                 try:
@@ -192,7 +187,6 @@ def restore_from_github():
                          p.get("material",""),p.get("start_time",""),p.get("end_time",""),p.get("duration_min",0),
                          p.get("material_g",0),p.get("status",""),p.get("device_model",""),p.get("filament_color",""),
                          p.get("ist_done",0),p.get("cost_time",0)))
-                    n_p+=1
                 except: pass
         if sc==0:
             for it in d.get("stock_items",[]):
@@ -203,7 +197,6 @@ def restore_from_github():
                 try:
                     db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
                         (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at","")))
-                    n_s+=1
                 except: pass
         db.commit(); db.close()
         global _sheets
@@ -211,7 +204,6 @@ def restore_from_github():
         if sh.get("orders") or sh.get("designs"):
             _sheets={"orders":sh.get("orders",[]),"designs":sh.get("designs",[]),"pendency":sh.get("pendency",[]),"fetched_at":time.time()}
             save_sheets_cache()
-        print(f"[RESTORE] Done — {n_p} prints, {n_s} stock entries restored from GitHub backup ({d.get('backed_up_at','?')})")
     except Exception as e: print(f"[RESTORE] Error: {e}")
 
 def auto_backup_loop():
@@ -219,7 +211,6 @@ def auto_backup_loop():
     while True:
         do_backup()
         time.sleep(1800)
-# =======================================================
 
 def parse_dt(v):
     if not v: return None
@@ -335,8 +326,7 @@ def startup_fixes():
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
         db.commit()
-        dn=dedup_prints(db)
-        print(f"[AUTO-FIX] Dedup:{dn}")
+        dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
     finally: db.close()
 
@@ -357,7 +347,6 @@ def fetch_tasks(token):
     return tasks
 
 def do_sync():
-    print(f"[SYNC] {datetime.now().strftime('%H:%M:%S')}")
     db=get_db()
     existing=set(r[0] for r in db.execute("SELECT task_id FROM prints").fetchall())
     new_count=0; upd_count=0
@@ -392,7 +381,6 @@ def do_sync():
     db.execute("INSERT INTO sync_log (synced_at,total_records,new_records,note) VALUES (?,?,?,?)",
                (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),total,new_count,f"upd:{upd_count}"))
     db.commit(); db.close()
-    print(f"[SYNC] Done +{new_count} updated:{upd_count} | total {total}")
     startup_fixes()
     return new_count
 
@@ -525,7 +513,6 @@ def monthly():
 @app.route('/materials')
 def materials():
     db=get_db()
-
     def fil_name(mat,col):
         m=(mat or "").upper(); c=(col or "").lower().strip()
         try:
@@ -537,9 +524,7 @@ def materials():
         elif "TPU" in m: return "eSUN TPU-95A"
         elif "PA" in m: return "eSUN ePA12"
         return mat or "Unknown"
-
     FILS=["eSun ABS+ Black","eSun ABS+ White","eSUN PLA+ Black","eSUN PLA+ White","eSUN TPU-95A","eSUN ePA12"]
-
     raw=db.execute("""SELECT material,filament_color,COUNT(*),
         COALESCE(SUM(material_g),0)/1000.0,
         COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
@@ -553,15 +538,12 @@ def materials():
         fil_total[fn]["parts"]+=r[2]; fil_total[fn]["kg"]+=round(float(r[3]),3); fil_total[fn]["failed"]+=r[4]
     top=[(k,v) for k,v in fil_total.items() if v["kg"]>0]
     top.sort(key=lambda x:x[1]["kg"],reverse=True)
-
     mraw=db.execute("""SELECT substr(date,1,7) as mo,city,material,filament_color,
         COUNT(*),COALESCE(SUM(material_g),0)/1000.0,
         COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
         FROM prints WHERE date!='' AND status IN ('Completed','Failed')
         GROUP BY mo,city,material,filament_color ORDER BY 1 DESC,2,3""").fetchall()
-
-    months_set=set()
-    _mdata={}
+    months_set=set(); _mdata={}
     for r in mraw:
         mo,city,mat,col=r[0],r[1],r[2],r[3]
         fn=fil_name(mat,col)
@@ -573,10 +555,8 @@ def materials():
         _mdata[mo][city][fn]["parts"]+=r[4]
         _mdata[mo][city][fn]["kg"]+=round(float(r[5]),3)
         _mdata[mo][city][fn]["failed"]+=r[6]
-
     months_list=sorted(months_set,reverse=True)[:6]
     sel_mo=request.args.get("mo",months_list[0] if months_list else "")
-
     db.close()
     return render_template('materials.html',top=top,mdata=_mdata,months_list=months_list,
         sel_mo=sel_mo,filaments=FILS,city_color=CITY_COLOR,cities=CITIES)
@@ -616,7 +596,6 @@ def orders():
 def designs():
     data=fetch_sheets(force=False); all_designs=data.get("designs",[])
     today_str=date.today().strftime("%Y-%m-%d")
-    today_limit=date.today().strftime("%Y-%m-%d")
     all_designs=sorted(all_designs,key=lambda x:x.get("printed_date","") or x.get("design_date",""),reverse=True)
     today_list=[d for d in all_designs if d.get("printed_date","")==today_str]
     filter_today=request.args.get("filter","")
@@ -630,7 +609,7 @@ def designs():
     _daily=defaultdict(lambda:{c:0 for c in CITIES})
     for d in all_designs:
         dd=d.get("printed_date",""); dc=d.get("city","")
-        if dd and dd<=today_limit and dc in CITIES: _daily[dd][dc]+=1
+        if dd and dd<=today_str and dc in CITIES: _daily[dd][dc]+=1
     daily_summary=sorted(_daily.items(),key=lambda x:x[0],reverse=True)[:30]
     return render_template('designs.html',designs=show_designs,all_count=len(all_designs),
         city_color=CITY_COLOR,cities=CITIES,today_count=len(today_list),
@@ -704,7 +683,7 @@ def stock_page():
             f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{tc}'>{sign}{_fmt_qty(t['qty'])} {t['iunit']}</td>"
             f"<td style='padding:8px 10px;color:#6b7280'>{_html.escape(t['note'] or '')}</td>"
             f"<td style='padding:8px 10px;text-align:center'><button onclick='delTxn({t['id']})' style='background:none;border:none;cursor:pointer;color:#dc2626;font-size:14px' title='Delete entry'>🗑</button></td></tr>")
-    if not log_rows: log_rows="<tr><td colspan='7' style='padding:20px;text-align:center;color:#9ca3af'>No entries yet — pehli entry Opening Stock ki karo 👆</td></tr>"
+    if not log_rows: log_rows="<tr><td colspan='7' style='padding:20px;text-align:center;color:#9ca3af'>No entries yet</td></tr>"
     item_options="".join(f"<option value='{it['id']}'>{_html.escape(it['name'])} ({it['unit']})</option>" for it in items)
     city_options="".join(f"<option value='{c}'>{c}</option>" for c in CITIES)
     db.close()
