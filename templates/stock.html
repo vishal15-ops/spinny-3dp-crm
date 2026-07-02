@@ -13,27 +13,24 @@
       </div>
     {% else %}
       <div style="font-size:12px;font-weight:600;color:#991b1b;background:#fee2e2;padding:6px 12px;border-radius:20px;display:inline-block">
-        ☁ Auto-backup OFF — set GH_TOKEN / GH_BACKUP_REPO
+        ☁ Auto-backup OFF
       </div>
     {% endif %}
   </div>
 </div>
 
-<!-- City tabs -->
 <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap">
   {{ tabs_html|safe }}
 </div>
 
-<!-- Summary table -->
 <div class="table-card">
   <div class="table-card-header">
     <span>Current Stock Summary</span>
-    <small>Opening + Purchased − Issued = Current</small>
+    <small>⚠ Orange = Low stock (reorder karo) | Red = Khatam</small>
   </div>
   {{ summary_html|safe }}
 </div>
 
-<!-- Add Entry form -->
 <div class="table-card" style="padding:18px 20px">
   <div style="font-size:13.5px;font-weight:600;margin-bottom:14px">➕ Add Stock Entry</div>
   <form id="stockForm" onsubmit="return false;" style="display:grid;grid-template-columns:130px 130px 1fr 140px 100px 1fr auto;gap:10px;align-items:end">
@@ -74,7 +71,6 @@
   <div id="formMsg" style="font-size:12px;margin-top:8px"></div>
 </div>
 
-<!-- Add new material -->
 <div class="table-card" style="padding:16px 20px;display:flex;gap:10px;align-items:end">
   <div>
     <label style="font-size:11px;color:#6b7280;display:block;margin-bottom:4px">New Material Name</label>
@@ -92,11 +88,21 @@
   <button onclick="addItem()" style="padding:9px 16px;background:#111827;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">+ Add Material</button>
 </div>
 
-<!-- Transaction log -->
+<div class="table-card">
+  <div class="table-card-header">
+    <span>⚙ Reorder Levels — jab stock isse kam ho, orange warning dikhega</span>
+  </div>
+  <table>
+    <thead><tr><th>Material</th><th>Unit</th><th style="text-align:center">Min Level</th><th></th></tr></thead>
+    <tbody>{{ reorder_html|safe }}</tbody>
+  </table>
+</div>
+
 <div class="table-card">
   <div class="table-card-header">
     <span>Recent Entries</span>
     <div style="display:flex;gap:10px">
+      <a href="/wastage" style="font-size:12px;color:#7c3aed;text-decoration:none;font-weight:600">📊 Wastage Report</a>
       <a href="/api/stock_export" style="font-size:12px;color:#2563eb;text-decoration:none">⬇ Export JSON</a>
       <a href="/api/backup_now" style="font-size:12px;color:#16a34a;text-decoration:none" onclick="return manualBackup(event)">☁ Backup Now</a>
     </div>
@@ -138,10 +144,15 @@ function addItem(){
   fetch('/api/stock_item_add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,unit:unit})})
     .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Error: '+d.error); });
 }
+function saveReorder(itemId){
+  const val=document.getElementById('reorder_'+itemId).value;
+  fetch('/api/stock_item_set_reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:itemId,reorder_level:val})})
+    .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Error: '+d.error); });
+}
 function manualBackup(e){
   e.preventDefault();
   fetch('/api/backup_now').then(r=>r.json()).then(d=>{
-    alert(d.ok ? '✅ Backup done — GitHub pe crm_backup.json update ho gaya' : '❌ Failed: '+d.error);
+    alert(d.ok ? '✅ Backup done' : '❌ Failed: '+d.error);
     location.reload();
   });
   return false;
