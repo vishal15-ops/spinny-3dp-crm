@@ -75,7 +75,8 @@ def init_db():
     for col in ["ALTER TABLE prints ADD COLUMN ist_done INTEGER DEFAULT 0",
                 "ALTER TABLE prints ADD COLUMN device_model TEXT DEFAULT ''",
                 "ALTER TABLE prints ADD COLUMN filament_color TEXT DEFAULT ''",
-                "ALTER TABLE prints ADD COLUMN cost_time INTEGER DEFAULT 0"]:
+                "ALTER TABLE prints ADD COLUMN cost_time INTEGER DEFAULT 0",
+                "ALTER TABLE stock_items ADD COLUMN reorder_level REAL DEFAULT 0"]:
         try: db.execute(col)
         except: pass
     STOCK_SEED=[("eSUN ABS+ Filament 1.75mm Black","Kgs"),
@@ -103,7 +104,6 @@ def load_sheets_cache():
         if row:
             cached=_json.loads(row[0])
             _sheets={"orders":cached.get("orders",[]),"designs":cached.get("designs",[]),"pendency":cached.get("pendency",[]),"fetched_at":time.time()}
-            print(f"[CACHE] Loaded {len(_sheets['orders'])} orders, {len(_sheets['designs'])} designs, {len(_sheets['pendency'])} pendency")
         db.close()
     except Exception as e: print(f"[CACHE] Load error: {e}")
 
@@ -190,8 +190,8 @@ def restore_from_github():
                 except: pass
         if sc==0:
             for it in d.get("stock_items",[]):
-                try: db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active) VALUES (?,?,?,?)",
-                        (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1)))
+                try: db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active,reorder_level) VALUES (?,?,?,?,?)",
+                        (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1),it.get("reorder_level",0)))
                 except: pass
             for t in d.get("stock_txn",[]):
                 try:
@@ -510,21 +510,34 @@ def monthly():
     db.close()
     return render_template('monthly.html',months_list=months_list,city_color=CITY_COLOR,cities=CITIES)
 
+def fil_name(mat,col):
+    m=(mat or "").upper(); c=(col or "").lower().strip()
+    try:
+        rv=int(c[0:2],16); gv=int(c[2:4],16); bv=int(c[4:6],16)
+        white=(rv>200 and gv>200 and bv>200)
+    except: white=False
+    if "ABS" in m: return "eSun ABS+ "+("White" if white else "Black")
+    elif "PLA" in m: return "eSUN PLA+ "+("White" if white else "Black")
+    elif "TPU" in m: return "eSUN TPU-95A"
+    elif "PA" in m: return "eSUN ePA12"
+    return mat or "Unknown"
+
+CATEGORY_TO_ITEM = {
+    "eSun ABS+ Black":"eSUN ABS+ Filament 1.75mm Black",
+    "eSun ABS+ White":"eSUN ABS+ Filament 1.75mm White",
+    "eSUN PLA+ Black":"eSUN PLA+ Filament 1.75mm Black",
+    "eSUN PLA+ White":"eSUN PLA+ Filament 1.75mm White",
+    "eSUN TPU-95A":"eSUN TPU-95A Filament 1.75mm Black",
+    "eSUN ePA12":"eSUN ePA12 Filament 1.75mm Black",
+}
+ITEM_TO_CATEGORY = {v:k for k,v in CATEGORY_TO_ITEM.items()}
+ITEM_TO_CATEGORY["eSUN ePA12 Filament 1.75mm White"] = "eSUN ePA12"
+
 @app.route('/materials')
 def materials():
     db=get_db()
-    def fil_name(mat,col):
-        m=(mat or "").upper(); c=(col or "").lower().strip()
-        try:
-            rv=int(c[0:2],16); gv=int(c[2:4],16); bv=int(c[4:6],16)
-            white=(rv>200 and gv>200 and bv>200)
-        except: white=False
-        if "ABS" in m: return "eSun ABS+ "+("White" if white else "Black")
-        elif "PLA" in m: return "eSUN PLA+ "+("White" if white else "Black")
-        elif "TPU" in m: return "eSUN TPU-95A"
-        elif "PA" in m: return "eSUN ePA12"
-        return mat or "Unknown"
     FILS=["eSun ABS+ Black","eSun ABS+ White","eSUN PLA+ Black","eSUN PLA+ White","eSUN TPU-95A","eSUN ePA12"]
+
     raw=db.execute("""SELECT material,filament_color,COUNT(*),
         COALESCE(SUM(material_g),0)/1000.0,
         COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
@@ -538,11 +551,13 @@ def materials():
         fil_total[fn]["parts"]+=r[2]; fil_total[fn]["kg"]+=round(float(r[3]),3); fil_total[fn]["failed"]+=r[4]
     top=[(k,v) for k,v in fil_total.items() if v["kg"]>0]
     top.sort(key=lambda x:x[1]["kg"],reverse=True)
+
     mraw=db.execute("""SELECT substr(date,1,7) as mo,city,material,filament_color,
         COUNT(*),COALESCE(SUM(material_g),0)/1000.0,
         COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
         FROM prints WHERE date!='' AND status IN ('Completed','Failed')
         GROUP BY mo,city,material,filament_color ORDER BY 1 DESC,2,3""").fetchall()
+
     months_set=set(); _mdata={}
     for r in mraw:
         mo,city,mat,col=r[0],r[1],r[2],r[3]
@@ -555,8 +570,10 @@ def materials():
         _mdata[mo][city][fn]["parts"]+=r[4]
         _mdata[mo][city][fn]["kg"]+=round(float(r[5]),3)
         _mdata[mo][city][fn]["failed"]+=r[6]
+
     months_list=sorted(months_set,reverse=True)[:6]
     sel_mo=request.args.get("mo",months_list[0] if months_list else "")
+
     db.close()
     return render_template('materials.html',top=top,mdata=_mdata,months_list=months_list,
         sel_mo=sel_mo,filaments=FILS,city_color=CITY_COLOR,cities=CITIES)
@@ -633,12 +650,15 @@ def stock_page():
         head="".join(f"<th style='text-align:center;padding:10px 8px;color:{CITY_COLOR[c]};font-weight:700;border-bottom:2px solid #e5e7eb'>{c}</th>" for c in CITIES)
         rows=""
         for it in items:
+            rl=float(it["reorder_level"] or 0)
             tot=sum(cur(c,it["id"]) for c in CITIES)
             cells=""
             for c in CITIES:
                 v=cur(c,it["id"])
-                col="#dc2626" if v<=0 else ("#d97706" if v<2 else "#111827")
-                cells+=f"<td style='text-align:center;padding:9px 8px;font-weight:600;color:{col}'>{_fmt_qty(v)}</td>"
+                if v<=0: col="#dc2626"; warn="⚠ "
+                elif rl>0 and v<=rl: col="#d97706"; warn="⚠ "
+                else: col="#111827"; warn=""
+                cells+=f"<td style='text-align:center;padding:9px 8px;font-weight:600;color:{col}'>{warn}{_fmt_qty(v)}</td>"
             rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
                 f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>{cells}"
                 f"<td style='text-align:center;padding:9px 8px;font-weight:700'>{_fmt_qty(tot)}</td></tr>")
@@ -649,14 +669,17 @@ def stock_page():
     else:
         rows=""
         for it in items:
+            rl=float(it["reorder_level"] or 0)
             a=agg[(cf,it["id"])]; v=a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
-            col="#dc2626" if v<=0 else ("#d97706" if v<2 else "#111827")
+            if v<=0: col="#dc2626"; warn="⚠ "
+            elif rl>0 and v<=rl: col="#d97706"; warn="⚠ "
+            else: col="#111827"; warn=""
             rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
                 f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>"
                 f"<td style='text-align:center;padding:9px 8px'>{_fmt_qty(a['OPENING'])}</td>"
                 f"<td style='text-align:center;padding:9px 8px;color:#16a34a'>+{_fmt_qty(a['PURCHASE'])}</td>"
                 f"<td style='text-align:center;padding:9px 8px;color:#dc2626'>−{_fmt_qty(a['ISSUE'])}</td>"
-                f"<td style='text-align:center;padding:9px 8px;font-weight:700;color:{col}'>{_fmt_qty(v)}</td></tr>")
+                f"<td style='text-align:center;padding:9px 8px;font-weight:700;color:{col}'>{warn}{_fmt_qty(v)}</td></tr>")
         summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f9fafb'>"
             f"<th style='text-align:left;padding:10px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Material</th>"
             f"<th style='text-align:left;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Unit</th>"
@@ -686,11 +709,69 @@ def stock_page():
     if not log_rows: log_rows="<tr><td colspan='7' style='padding:20px;text-align:center;color:#9ca3af'>No entries yet</td></tr>"
     item_options="".join(f"<option value='{it['id']}'>{_html.escape(it['name'])} ({it['unit']})</option>" for it in items)
     city_options="".join(f"<option value='{c}'>{c}</option>" for c in CITIES)
+    reorder_rows=""
+    for it in items:
+        reorder_rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
+            f"<td style='padding:8px 14px'>{_html.escape(it['name'])}</td>"
+            f"<td style='padding:8px 8px;color:#6b7280'>{it['unit']}</td>"
+            f"<td style='padding:8px 8px;text-align:center'><input type='number' step='0.1' id='reorder_{it['id']}' value='{it['reorder_level'] or 0}' style='width:80px;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;text-align:center'></td>"
+            f"<td style='padding:8px 8px;text-align:center'><button onclick='saveReorder({it['id']})' style='padding:5px 14px;background:#111827;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer'>Save</button></td></tr>")
     db.close()
     return render_template('stock.html',summary_html=summary_html,tabs_html=tabs,
         log_html=log_rows,item_options=item_options,city_options=city_options,
+        reorder_html=reorder_rows,
         city_filter=cf,today=date.today().strftime("%Y-%m-%d"),txn_count=len(txns),
         backup_last=_backup_state["last"],backup_on=bool(GH_TOKEN and GH_REPO))
+
+def compute_wastage():
+    db=get_db()
+    today=date.today().strftime("%Y-%m-%d")
+    items=db.execute("SELECT * FROM stock_items WHERE unit='Kgs' AND active=1").fetchall()
+    out=[]
+    for it in items:
+        cat=ITEM_TO_CATEGORY.get(it["name"])
+        if not cat: continue
+        for c in CITIES:
+            issues=db.execute("SELECT * FROM stock_txn WHERE city=? AND item_id=? AND txn_type='ISSUE' ORDER BY date ASC,id ASC",(c,it["id"])).fetchall()
+            for i,txn in enumerate(issues):
+                start_d=txn["date"]
+                end_d=issues[i+1]["date"] if i+1<len(issues) else today
+                prints=db.execute("SELECT material,filament_color,material_g FROM prints WHERE city=? AND date>=? AND date<? AND status IN ('Completed','Failed')",(c,start_d,end_d)).fetchall()
+                actual_g=sum(float(p["material_g"] or 0) for p in prints if fil_name(p["material"],p["filament_color"])==cat)
+                issued_g=float(txn["qty"])*1000
+                wastage_g=issued_g-actual_g
+                wpct=(wastage_g/issued_g*100) if issued_g>0 else 0
+                out.append({"city":c,"material":it["name"],"date":start_d,"period_end":end_d,
+                    "issued_g":round(issued_g,1),"actual_g":round(actual_g,1),
+                    "wastage_g":round(wastage_g,1),"wpct":round(wpct,1)})
+    db.close()
+    out.sort(key=lambda x:x["date"],reverse=True)
+    return out
+
+def build_wastage_html(rows):
+    if not rows:
+        return "<tr><td colspan='7' style='padding:24px;text-align:center;color:#9ca3af'>Koi Issue entry nahi mili — pehle Daily Materials page pe Issue karo, phir wastage calculate hoga</td></tr>"
+    html=""
+    for r in rows:
+        if r["wpct"]<0: col="#7c3aed"
+        elif r["wpct"]<=10: col="#16a34a"
+        elif r["wpct"]<=25: col="#d97706"
+        else: col="#dc2626"
+        html+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
+            f"<td style='padding:8px 12px;white-space:nowrap;color:#6b7280;font-size:12px'>{r['date']} → {r['period_end']}</td>"
+            f"<td style='padding:8px 10px'><span style='color:{CITY_COLOR.get(r['city'],'#6b7280')};font-weight:600'>{r['city']}</span></td>"
+            f"<td style='padding:8px 10px'>{_html.escape(r['material'])}</td>"
+            f"<td style='padding:8px 10px;text-align:center'>{r['issued_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center'>{r['actual_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center;font-weight:600'>{r['wastage_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{col}'>{r['wpct']}%</td></tr>")
+    return html
+
+@app.route('/wastage')
+def wastage_page():
+    rows=compute_wastage()
+    wastage_html=build_wastage_html(rows)
+    return render_template('wastage.html',wastage_html=wastage_html,city_color=CITY_COLOR,cities=CITIES)
 
 @app.route('/api/stock_add',methods=['POST'])
 def stock_add():
@@ -728,6 +809,17 @@ def stock_item_add():
         return jsonify({"ok":True})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
 
+@app.route('/api/stock_item_set_reorder',methods=['POST'])
+def stock_item_set_reorder():
+    try:
+        p=request.get_json(force=True)
+        db=get_db()
+        db.execute("UPDATE stock_items SET reorder_level=? WHERE id=?",(float(p.get("reorder_level",0)),int(p["item_id"])))
+        db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
 @app.route('/api/stock_export')
 def stock_export():
     db=get_db()
@@ -745,8 +837,8 @@ def stock_import():
         db=get_db()
         db.execute("DELETE FROM stock_txn"); db.execute("DELETE FROM stock_items")
         for it in p.get("items",[]):
-            db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active) VALUES (?,?,?,?)",
-                (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1)))
+            db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active,reorder_level) VALUES (?,?,?,?,?)",
+                (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1),it.get("reorder_level",0)))
         for t in p.get("txns",[]):
             db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
                 (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at","")))
