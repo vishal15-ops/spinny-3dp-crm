@@ -59,6 +59,13 @@ def init_db():
             synced_at TEXT, total_records INTEGER, new_records INTEGER, note TEXT);
         CREATE TABLE IF NOT EXISTS sheets_cache (
             key TEXT PRIMARY KEY, data TEXT, updated_at TEXT);
+        CREATE TABLE IF NOT EXISTS stock_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE, unit TEXT DEFAULT 'Kgs', active INTEGER DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS stock_txn (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT, city TEXT, item_id INTEGER,
+            txn_type TEXT, qty REAL, note TEXT DEFAULT '', created_at TEXT);
         CREATE INDEX IF NOT EXISTS idx_date ON prints(date);
         CREATE INDEX IF NOT EXISTS idx_city ON prints(city);""")
     for col in ["ALTER TABLE prints ADD COLUMN ist_done INTEGER DEFAULT 0",
@@ -66,6 +73,20 @@ def init_db():
                 "ALTER TABLE prints ADD COLUMN filament_color TEXT DEFAULT ''",
                 "ALTER TABLE prints ADD COLUMN cost_time INTEGER DEFAULT 0"]:
         try: db.execute(col)
+        except: pass
+    STOCK_SEED=[("eSUN ABS+ Filament 1.75mm Black","Kgs"),
+        ("eSUN ABS+ Filament 1.75mm White","Kgs"),
+        ("eSUN PLA+ Filament 1.75mm Black","Kgs"),
+        ("eSUN PLA+ Filament 1.75mm White","Kgs"),
+        ("eSUN TPU-95A Filament 1.75mm Black","Kgs"),
+        ("eSUN ePA12 Filament 1.75mm Black","Kgs"),
+        ("Dye Penetrant Spray","Piece"),
+        ("Glue Stick 3D","Piece"),
+        ("MAX Microfiber Cloth 30x40 cm","Piece"),
+        ("Dettol Alcohol Sanitizer","Piece"),
+        ("3D Printer Gear Grease Lubricant","Piece")]
+    for nm,un in STOCK_SEED:
+        try: db.execute("INSERT OR IGNORE INTO stock_items (name,unit) VALUES (?,?)",(nm,un))
         except: pass
     db.commit(); db.close()
 
@@ -89,6 +110,111 @@ def save_sheets_cache():
             datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")))
         db.commit(); db.close()
     except Exception as e: print(f"[CACHE] Save error: {e}")
+
+# ================= GITHUB AUTO-BACKUP =================
+import hashlib, base64 as _b64
+GH_TOKEN=os.environ.get("GH_TOKEN","")
+GH_REPO=os.environ.get("GH_BACKUP_REPO","")
+GH_PATH="crm_backup.json"
+_backup_state={"last":"never","hash":"","error":""}
+
+def _gh_headers(raw=False):
+    h={"Authorization":f"Bearer {GH_TOKEN}","X-GitHub-Api-Version":"2022-11-28"}
+    h["Accept"]="application/vnd.github.raw+json" if raw else "application/vnd.github+json"
+    return h
+
+def collect_backup():
+    db=get_db()
+    data={"prints":[dict(r) for r in db.execute("SELECT * FROM prints").fetchall()],
+          "stock_items":[dict(r) for r in db.execute("SELECT * FROM stock_items").fetchall()],
+          "stock_txn":[dict(r) for r in db.execute("SELECT * FROM stock_txn").fetchall()],
+          "sheets":{"orders":_sheets["orders"],"designs":_sheets["designs"],"pendency":_sheets["pendency"]}}
+    db.close(); return data
+
+def do_backup(force=False):
+    global _backup_state
+    if not GH_TOKEN or not GH_REPO:
+        _backup_state["error"]="GH_TOKEN / GH_BACKUP_REPO env vars not set"; return False
+    try:
+        data=collect_backup()
+        core=_json.dumps(data,sort_keys=True,default=str)
+        h=hashlib.md5(core.encode()).hexdigest()
+        if h==_backup_state["hash"] and not force:
+            return True  # no change since last backup
+        now=datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+        data["backed_up_at"]=now
+        b64=_b64.b64encode(_json.dumps(data,default=str).encode()).decode()
+        url=f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
+        sha=None
+        r=requests.get(url,headers=_gh_headers(),timeout=30)
+        if r.status_code==200: sha=r.json().get("sha")
+        body={"message":f"CRM auto-backup {now} [skip render]","content":b64}
+        if sha: body["sha"]=sha
+        r=requests.put(url,headers=_gh_headers(),json=body,timeout=90)
+        if r.status_code in (200,201):
+            _backup_state={"last":now,"hash":h,"error":""}
+            print(f"[BACKUP] Saved to GitHub @ {now} ({len(data['prints'])} prints, {len(data['stock_txn'])} stock txns)")
+            return True
+        _backup_state["error"]=f"GitHub API {r.status_code}"
+        print(f"[BACKUP] Failed: {r.status_code} {r.text[:200]}"); return False
+    except Exception as e:
+        _backup_state["error"]=str(e); print(f"[BACKUP] Error: {e}"); return False
+
+def backup_async():
+    threading.Thread(target=do_backup,daemon=True).start()
+
+def restore_from_github():
+    if not GH_TOKEN or not GH_REPO:
+        print("[RESTORE] Skipped — GH_TOKEN / GH_BACKUP_REPO not set"); return
+    try:
+        db=get_db()
+        pc=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
+        sc=db.execute("SELECT COUNT(*) FROM stock_txn").fetchone()[0]
+        if pc>0 and sc>0: db.close(); return  # data already present
+        url=f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
+        r=requests.get(url,headers=_gh_headers(raw=True),timeout=90)
+        if r.status_code!=200:
+            db.close(); print(f"[RESTORE] No backup found ({r.status_code}) — fresh start"); return
+        d=_json.loads(r.text)
+        n_p=n_s=0
+        if pc==0:
+            for p in d.get("prints",[]):
+                try:
+                    db.execute("""INSERT OR IGNORE INTO prints
+                        (task_id,date,part_name,printer,city,material,start_time,end_time,duration_min,material_g,status,device_model,filament_color,ist_done,cost_time)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (p.get("task_id"),p.get("date",""),p.get("part_name",""),p.get("printer",""),p.get("city",""),
+                         p.get("material",""),p.get("start_time",""),p.get("end_time",""),p.get("duration_min",0),
+                         p.get("material_g",0),p.get("status",""),p.get("device_model",""),p.get("filament_color",""),
+                         p.get("ist_done",0),p.get("cost_time",0)))
+                    n_p+=1
+                except: pass
+        if sc==0:
+            for it in d.get("stock_items",[]):
+                try: db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active) VALUES (?,?,?,?)",
+                        (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1)))
+                except: pass
+            for t in d.get("stock_txn",[]):
+                try:
+                    db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                        (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at","")))
+                    n_s+=1
+                except: pass
+        db.commit(); db.close()
+        global _sheets
+        sh=d.get("sheets",{})
+        if sh.get("orders") or sh.get("designs"):
+            _sheets={"orders":sh.get("orders",[]),"designs":sh.get("designs",[]),"pendency":sh.get("pendency",[]),"fetched_at":time.time()}
+            save_sheets_cache()
+        print(f"[RESTORE] Done — {n_p} prints, {n_s} stock entries restored from GitHub backup ({d.get('backed_up_at','?')})")
+    except Exception as e: print(f"[RESTORE] Error: {e}")
+
+def auto_backup_loop():
+    time.sleep(120)
+    while True:
+        do_backup()
+        time.sleep(1800)
+# =======================================================
 
 def parse_dt(v):
     if not v: return None
@@ -344,7 +470,6 @@ def dashboard():
     daily_rows_html=build_daily_html(db,today)
     last_sync=db.execute("SELECT synced_at,total_records FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     sheets=_sheets; orders=sheets.get("orders",[]); designs=sheets.get("designs",[])
-    pendency=sheets.get("pendency",[])
     ord_city={}
     for c in CITIES:
         co=[o for o in orders if o.get("order_city")==c]
@@ -359,9 +484,7 @@ def dashboard():
         recent_html=recent_html,daily_rows_html=daily_rows_html,
         last_sync=last_sync,today=today,city_color=CITY_COLOR,cities=CITIES,
         ord_city=ord_city,total_orders=len(orders),
-        today_designs=today_designs,month_designs=month_designs,total_designs=len(designs),
-        total_pendency=len(pendency),
-        pendency_overdue=len([p for p in pendency if p.get("tat_over24","").lower()=="yes"]))
+        today_designs=today_designs,month_designs=month_designs,total_designs=len(designs))
 
 @app.route('/city/<city>')
 def city_page(city):
@@ -509,28 +632,147 @@ def designs():
         filter_today=filter_today,filter_date=filter_date,today_str=today_str,
         daily_summary=daily_summary)
 
-@app.route('/pendency')
-def pendency():
-    data=fetch_sheets(force=False)
-    all_p=data.get("pendency",[])
-    cf=request.args.get("city","All")
-    rf=request.args.get("remarks","All")
-    filtered=all_p
-    if cf!="All": filtered=[p for p in filtered if p.get("city","")==cf]
-    if rf=="pending": filtered=[p for p in filtered if not p.get("remarks_3dp","").strip()]
-    elif rf=="done": filtered=[p for p in filtered if p.get("remarks_3dp","").strip().lower() in ["done","done my side"]]
-    elif rf=="tomorrow": filtered=[p for p in filtered if "tomorrow" in p.get("remarks_3dp","").lower()]
-    elif rf=="not_possible": filtered=[p for p in filtered if "not possible" in p.get("remarks_3dp","").lower()]
-    all_cities=sorted(set(p.get("city","") for p in all_p if p.get("city","")))
-    city_stats={}
-    for c in all_cities:
-        cp=[p for p in all_p if p.get("city","")==c]
-        city_stats[c]={"total":len(cp),"pending":len([p for p in cp if not p.get("remarks_3dp","").strip()]),"done":len([p for p in cp if p.get("remarks_3dp","").strip().lower() in ["done","done my side"]]),"tat_over":len([p for p in cp if p.get("tat_over24","").lower()=="yes"])}
-    tat_over=len([p for p in all_p if p.get("tat_over24","").lower()=="yes"])
-    pending_count=len([p for p in all_p if not p.get("remarks_3dp","").strip()])
-    return render_template('pendency.html',pendency=filtered,all_count=len(all_p),
-        city_filter=cf,remarks_filter=rf,city_stats=city_stats,all_cities=all_cities,
-        tat_over=tat_over,pending_count=pending_count)
+def _fmt_qty(v):
+    v=float(v or 0)
+    return str(int(v)) if v==int(v) else f"{v:g}"
+
+@app.route('/stock')
+def stock_page():
+    db=get_db(); cf=request.args.get("city","All")
+    items=db.execute("SELECT * FROM stock_items WHERE active=1 ORDER BY unit DESC,id").fetchall()
+    txns=db.execute("SELECT t.*,i.name AS iname,i.unit AS iunit FROM stock_txn t JOIN stock_items i ON i.id=t.item_id ORDER BY t.id DESC").fetchall()
+    agg=defaultdict(lambda:{"OPENING":0.0,"PURCHASE":0.0,"ISSUE":0.0})
+    for t in txns: agg[(t["city"],t["item_id"])][t["txn_type"]]+=float(t["qty"] or 0)
+    def cur(city,iid):
+        a=agg[(city,iid)]; return a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
+    # ---- summary table ----
+    if cf=="All":
+        head="".join(f"<th style='text-align:center;padding:10px 8px;color:{CITY_COLOR[c]};font-weight:700;border-bottom:2px solid #e5e7eb'>{c}</th>" for c in CITIES)
+        rows=""
+        for it in items:
+            tot=sum(cur(c,it["id"]) for c in CITIES)
+            cells=""
+            for c in CITIES:
+                v=cur(c,it["id"])
+                col="#dc2626" if v<=0 else ("#d97706" if v<2 else "#111827")
+                cells+=f"<td style='text-align:center;padding:9px 8px;font-weight:600;color:{col}'>{_fmt_qty(v)}</td>"
+            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
+                f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>{cells}"
+                f"<td style='text-align:center;padding:9px 8px;font-weight:700'>{_fmt_qty(tot)}</td></tr>")
+        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f9fafb'>"
+            f"<th style='text-align:left;padding:10px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Material</th>"
+            f"<th style='text-align:left;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Unit</th>{head}"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Total</th></tr></thead><tbody>{rows}</tbody></table>")
+    else:
+        rows=""
+        for it in items:
+            a=agg[(cf,it["id"])]; v=a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
+            col="#dc2626" if v<=0 else ("#d97706" if v<2 else "#111827")
+            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
+                f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>"
+                f"<td style='text-align:center;padding:9px 8px'>{_fmt_qty(a['OPENING'])}</td>"
+                f"<td style='text-align:center;padding:9px 8px;color:#16a34a'>+{_fmt_qty(a['PURCHASE'])}</td>"
+                f"<td style='text-align:center;padding:9px 8px;color:#dc2626'>−{_fmt_qty(a['ISSUE'])}</td>"
+                f"<td style='text-align:center;padding:9px 8px;font-weight:700;color:{col}'>{_fmt_qty(v)}</td></tr>")
+        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f9fafb'>"
+            f"<th style='text-align:left;padding:10px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Material</th>"
+            f"<th style='text-align:left;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Unit</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Opening</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Purchased</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Issued/Used</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Current Stock</th></tr></thead><tbody>{rows}</tbody></table>")
+    # ---- city tabs ----
+    tabs=""
+    for c in ["All"]+CITIES:
+        on=(c==cf)
+        tabs+=(f"<a href='/stock?city={c}' style='text-decoration:none'><div style='padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;"
+            f"background:{'#e91e63' if on else '#fff'};color:{'#fff' if on else '#374151'};border:2px solid {'#e91e63' if on else '#e5e7eb'}'>{c}</div></a>")
+    # ---- txn log ----
+    show=[t for t in txns if cf=="All" or t["city"]==cf][:50]
+    TYPE_BADGE={"OPENING":("🏁 Opening","#6366f1"),"PURCHASE":("🛒 Purchase","#16a34a"),"ISSUE":("📤 Issue","#dc2626")}
+    log_rows=""
+    for t in show:
+        lb,tc=TYPE_BADGE.get(t["txn_type"],(t["txn_type"],"#6b7280"))
+        sign="−" if t["txn_type"]=="ISSUE" else "+"
+        log_rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
+            f"<td style='padding:8px 12px;white-space:nowrap;color:#6b7280'>{t['date']}</td>"
+            f"<td style='padding:8px 10px'><span style='color:{CITY_COLOR.get(t['city'],'#6b7280')};font-weight:600'>{t['city']}</span></td>"
+            f"<td style='padding:8px 10px'>{_html.escape(t['iname'])}</td>"
+            f"<td style='padding:8px 10px;color:{tc};font-weight:600;white-space:nowrap'>{lb}</td>"
+            f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{tc}'>{sign}{_fmt_qty(t['qty'])} {t['iunit']}</td>"
+            f"<td style='padding:8px 10px;color:#6b7280'>{_html.escape(t['note'] or '')}</td>"
+            f"<td style='padding:8px 10px;text-align:center'><button onclick='delTxn({t['id']})' style='background:none;border:none;cursor:pointer;color:#dc2626;font-size:14px' title='Delete entry'>🗑</button></td></tr>")
+    if not log_rows: log_rows="<tr><td colspan='7' style='padding:20px;text-align:center;color:#9ca3af'>No entries yet — pehli entry Opening Stock ki karo 👆</td></tr>"
+    item_options="".join(f"<option value='{it['id']}'>{_html.escape(it['name'])} ({it['unit']})</option>" for it in items)
+    city_options="".join(f"<option value='{c}'>{c}</option>" for c in CITIES)
+    db.close()
+    return render_template('stock.html',summary_html=summary_html,tabs_html=tabs,
+        log_html=log_rows,item_options=item_options,city_options=city_options,
+        city_filter=cf,today=date.today().strftime("%Y-%m-%d"),txn_count=len(txns),
+        backup_last=_backup_state["last"],backup_on=bool(GH_TOKEN and GH_REPO))
+
+@app.route('/api/stock_add',methods=['POST'])
+def stock_add():
+    try:
+        p=request.get_json(force=True)
+        qty=float(p.get("qty",0))
+        if qty<=0 or p.get("city") not in CITIES or p.get("txn_type") not in ["OPENING","PURCHASE","ISSUE"]:
+            return jsonify({"ok":False,"error":"invalid"}),400
+        db=get_db()
+        db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?)",
+            (p.get("date") or date.today().strftime("%Y-%m-%d"),p["city"],int(p["item_id"]),p["txn_type"],qty,
+             p.get("note","").strip(),datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")))
+        db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/stock_delete',methods=['POST'])
+def stock_delete():
+    try:
+        p=request.get_json(force=True)
+        db=get_db(); db.execute("DELETE FROM stock_txn WHERE id=?",(int(p["id"]),)); db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/stock_item_add',methods=['POST'])
+def stock_item_add():
+    try:
+        p=request.get_json(force=True)
+        nm=p.get("name","").strip(); un=p.get("unit","Kgs").strip() or "Kgs"
+        if not nm: return jsonify({"ok":False,"error":"name required"}),400
+        db=get_db(); db.execute("INSERT OR IGNORE INTO stock_items (name,unit) VALUES (?,?)",(nm,un)); db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/stock_export')
+def stock_export():
+    db=get_db()
+    items=[dict(r) for r in db.execute("SELECT * FROM stock_items").fetchall()]
+    txns=[dict(r) for r in db.execute("SELECT * FROM stock_txn").fetchall()]
+    db.close()
+    resp=jsonify({"items":items,"txns":txns,"exported_at":datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")})
+    resp.headers["Content-Disposition"]="attachment; filename=stock_backup.json"
+    return resp
+
+@app.route('/api/stock_import',methods=['POST'])
+def stock_import():
+    try:
+        p=request.get_json(force=True)
+        db=get_db()
+        db.execute("DELETE FROM stock_txn"); db.execute("DELETE FROM stock_items")
+        for it in p.get("items",[]):
+            db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active) VALUES (?,?,?,?)",
+                (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1)))
+        for t in p.get("txns",[]):
+            db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at","")))
+        db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True,"txns":len(p.get("txns",[]))})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
 
 @app.route('/api/sheets_update',methods=['POST'])
 def sheets_update():
@@ -549,6 +791,11 @@ def api_sync():
     try: n=do_sync(); return jsonify({"ok":True,"new":n})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),500
 
+@app.route('/api/backup_now',methods=['GET','POST'])
+def api_backup_now():
+    ok=do_backup(force=True)
+    return jsonify({"ok":ok,"last":_backup_state["last"],"error":_backup_state["error"]})
+
 @app.route('/api/health')
 def health():
     db=get_db(); total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
@@ -559,8 +806,10 @@ def health():
 
 init_db()
 load_sheets_cache()
+restore_from_github()
 startup_fixes()
 threading.Thread(target=auto_sync_loop,daemon=True).start()
+threading.Thread(target=auto_backup_loop,daemon=True).start()
 if __name__=='__main__':
     port=int(os.environ.get('PORT',5000))
     app.run(host='0.0.0.0',port=port,debug=False)
