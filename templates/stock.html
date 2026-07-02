@@ -26,7 +26,7 @@
 <div class="table-card">
   <div class="table-card-header">
     <span>Current Stock Summary</span>
-    <small>⚠ Orange = Low stock (reorder karo) | Red = Khatam</small>
+    <small>⚠ Orange = Low stock (reorder needed) | Red = Out of stock</small>
   </div>
   {{ summary_html|safe }}
 </div>
@@ -90,7 +90,7 @@
 
 <div class="table-card">
   <div class="table-card-header">
-    <span>⚙ Reorder Levels — jab stock isse kam ho, orange warning dikhega</span>
+    <span>⚙ Reorder Levels — an orange warning shows when stock falls below this level</span>
   </div>
   <table>
     <thead><tr><th>Material</th><th>Unit</th><th style="text-align:center">Min Level</th><th></th></tr></thead>
@@ -124,7 +124,7 @@ function addStock(){
     note: document.getElementById('f_note').value
   };
   const msg=document.getElementById('formMsg');
-  if(!body.qty || parseFloat(body.qty)<=0){ msg.style.color='#dc2626'; msg.textContent='Qty daalo bhai 🙂'; return; }
+  if(!body.qty || parseFloat(body.qty)<=0){ msg.style.color='#dc2626'; msg.textContent='Please enter a quantity'; return; }
   fetch('/api/stock_add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(r=>r.json())
     .then(d=>{
@@ -140,7 +140,7 @@ function delTxn(id){
 function addItem(){
   const name=document.getElementById('new_item_name').value.trim();
   const unit=document.getElementById('new_item_unit').value;
-  if(!name){ alert('Material naam daalo'); return; }
+  if(!name){ alert('Please enter a material name'); return; }
   fetch('/api/stock_item_add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,unit:unit})})
     .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Error: '+d.error); });
 }
