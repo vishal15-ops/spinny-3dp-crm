@@ -753,7 +753,7 @@ def compute_wastage():
 
 def build_wastage_html(rows):
     if not rows:
-        return "<tr><td colspan='7' style='padding:24px;text-align:center;color:#9ca3af'>Koi Issue entry nahi mili — pehle Daily Materials page pe Issue karo, phir wastage calculate hoga</td></tr>"
+        return "<tr><td colspan='7' style='padding:24px;text-align:center;color:#9ca3af'>No Issue entries found yet — add an Issue entry on the Daily Materials page first, then wastage will be calculated</td></tr>"
     html=""
     for r in rows:
         if r["wpct"]<0: col="#7c3aed"
