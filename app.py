@@ -1,4 +1,4 @@
-"""Spinny 3DP CRM - Cloud Edition. Real data from Bambu API, auto-cleaned."""
+    """Spinny 3DP CRM - Cloud Edition. Real data from Bambu API, auto-cleaned."""
 import os, sqlite3, threading, time, html as _html, json as _json
 from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
@@ -41,7 +41,11 @@ def fetch_sheets(force=False):
     return _sheets
 
 def get_db():
-    db=sqlite3.connect(DB_PATH); db.row_factory=sqlite3.Row; return db
+    db=sqlite3.connect(DB_PATH, timeout=30)
+    db.row_factory=sqlite3.Row
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA busy_timeout=30000")
+    return db
 
 def init_db():
     db=get_db()
@@ -80,6 +84,7 @@ def init_db():
         ("eSUN PLA+ Filament 1.75mm White","Kgs"),
         ("eSUN TPU-95A Filament 1.75mm Black","Kgs"),
         ("eSUN ePA12 Filament 1.75mm Black","Kgs"),
+        ("eSUN ePA12 Filament 1.75mm White","Kgs"),
         ("Dye Penetrant Spray","Piece"),
         ("Glue Stick 3D","Piece"),
         ("MAX Microfiber Cloth 30x40 cm","Piece"),
@@ -140,7 +145,7 @@ def do_backup(force=False):
         core=_json.dumps(data,sort_keys=True,default=str)
         h=hashlib.md5(core.encode()).hexdigest()
         if h==_backup_state["hash"] and not force:
-            return True  # no change since last backup
+            return True
         now=datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
         data["backed_up_at"]=now
         b64=_b64.b64encode(_json.dumps(data,default=str).encode()).decode()
@@ -170,7 +175,7 @@ def restore_from_github():
         db=get_db()
         pc=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
         sc=db.execute("SELECT COUNT(*) FROM stock_txn").fetchone()[0]
-        if pc>0 and sc>0: db.close(); return  # data already present
+        if pc>0 and sc>0: db.close(); return
         url=f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
         r=requests.get(url,headers=_gh_headers(raw=True),timeout=90)
         if r.status_code!=200:
@@ -645,7 +650,6 @@ def stock_page():
     for t in txns: agg[(t["city"],t["item_id"])][t["txn_type"]]+=float(t["qty"] or 0)
     def cur(city,iid):
         a=agg[(city,iid)]; return a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
-    # ---- summary table ----
     if cf=="All":
         head="".join(f"<th style='text-align:center;padding:10px 8px;color:{CITY_COLOR[c]};font-weight:700;border-bottom:2px solid #e5e7eb'>{c}</th>" for c in CITIES)
         rows=""
@@ -681,13 +685,11 @@ def stock_page():
             f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Purchased</th>"
             f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Issued/Used</th>"
             f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Current Stock</th></tr></thead><tbody>{rows}</tbody></table>")
-    # ---- city tabs ----
     tabs=""
     for c in ["All"]+CITIES:
         on=(c==cf)
         tabs+=(f"<a href='/stock?city={c}' style='text-decoration:none'><div style='padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;"
             f"background:{'#e91e63' if on else '#fff'};color:{'#fff' if on else '#374151'};border:2px solid {'#e91e63' if on else '#e5e7eb'}'>{c}</div></a>")
-    # ---- txn log ----
     show=[t for t in txns if cf=="All" or t["city"]==cf][:50]
     TYPE_BADGE={"OPENING":("🏁 Opening","#6366f1"),"PURCHASE":("🛒 Purchase","#16a34a"),"ISSUE":("📤 Issue","#dc2626")}
     log_rows=""
