@@ -347,36 +347,39 @@ def fetch_tasks(token):
     return tasks
 
 def do_sync():
-    db=get_db()
-    existing=set(r[0] for r in db.execute("SELECT task_id FROM prints").fetchall())
-    new_count=0; upd_count=0
+    all_records = []
     for acc in ACCOUNTS:
         tasks=fetch_tasks(acc["token"])
         for t in tasks:
             tid=str(t.get("id",""))
             if not tid: continue
             rec=compute_record(t, acc)
-            if rec["status"] not in ("Completed","Failed","Cancelled"):
-                if tid in existing:
-                    db.execute("DELETE FROM prints WHERE task_id=?",(tid,))
-                continue
+            all_records.append((tid, rec))
+    db=get_db()
+    existing=set(r[0] for r in db.execute("SELECT task_id FROM prints").fetchall())
+    new_count=0; upd_count=0
+    for tid, rec in all_records:
+        if rec["status"] not in ("Completed","Failed","Cancelled"):
             if tid in existing:
-                db.execute("""UPDATE prints SET date=?,part_name=?,printer=?,city=?,material=?,
-                    start_time=?,end_time=?,duration_min=?,material_g=?,status=?,device_model=?,
-                    filament_color=?,cost_time=?,ist_done=1 WHERE task_id=?""",
-                    (rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
-                     rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
-                     rec["color"],rec["cost"],tid))
-                upd_count+=1
-            else:
-                db.execute("""INSERT OR IGNORE INTO prints
-                    (task_id,date,part_name,printer,city,material,start_time,end_time,
-                     duration_min,material_g,status,device_model,filament_color,ist_done,cost_time)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
-                    (tid,rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
-                     rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
-                     rec["color"],rec["cost"]))
-                existing.add(tid); new_count+=1
+                db.execute("DELETE FROM prints WHERE task_id=?",(tid,))
+            continue
+        if tid in existing:
+            db.execute("""UPDATE prints SET date=?,part_name=?,printer=?,city=?,material=?,
+                start_time=?,end_time=?,duration_min=?,material_g=?,status=?,device_model=?,
+                filament_color=?,cost_time=?,ist_done=1 WHERE task_id=?""",
+                (rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
+                 rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
+                 rec["color"],rec["cost"],tid))
+            upd_count+=1
+        else:
+            db.execute("""INSERT OR IGNORE INTO prints
+                (task_id,date,part_name,printer,city,material,start_time,end_time,
+                 duration_min,material_g,status,device_model,filament_color,ist_done,cost_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+                (tid,rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
+                 rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
+                 rec["color"],rec["cost"]))
+            existing.add(tid); new_count+=1
     total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
     db.execute("INSERT INTO sync_log (synced_at,total_records,new_records,note) VALUES (?,?,?,?)",
                (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),total,new_count,f"upd:{upd_count}"))
