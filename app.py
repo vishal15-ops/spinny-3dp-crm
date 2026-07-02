@@ -43,7 +43,7 @@ def fetch_sheets(force=False):
 def get_db():
     db=sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory=sqlite3.Row
-    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA journal_mode=DELETE")
     db.execute("PRAGMA busy_timeout=30000")
     return db
 
