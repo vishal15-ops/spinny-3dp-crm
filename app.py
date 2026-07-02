@@ -1,27 +1,910 @@
-{% extends "base.html" %}
-{% block title %}Wastage Report{% endblock %}
-{% block content %}
-<div class="page-header">
-  <div>
-    <div class="page-title">📊 Material Wastage Report</div>
-    <div class="page-meta">For every "Issue" entry, wastage is calculated by matching actual material printed between that date and the next Issue entry</div>
-  </div>
-  <a href="/stock" style="text-decoration:none;font-size:13px;color:#e91e63;font-weight:600">← Back to Stock</a>
-</div>
+"""Spinny 3DP CRM - Cloud Edition. Real data from Bambu API, auto-cleaned."""
+import os, sqlite3, threading, time, html as _html, json as _json
+from datetime import datetime, date, timezone, timedelta
+from flask import Flask, render_template, jsonify, redirect, request
+import requests
+from collections import defaultdict
 
-<div class="table-card" style="padding:14px 20px;margin-bottom:18px;background:#fef9c3">
-  <div style="font-size:12.5px;color:#854d0e">
-    <b>Note:</b> 🔄 <b>Ongoing</b> = this spool is still in use (no newer Issue yet) — the leftover is just "Remaining", not wastage, since printing may still use it up. ✅ <b>Closed</b> = a newer Issue has been logged, so this spool is treated as finished — the leftover is the true "Wastage". Green = 0-10% wastage (normal), Orange = 10-25% (slightly high), Red = 25%+ (needs checking), Purple = more used than issued (possibly an incorrect spool size entry).
-  </div>
-</div>
+IST = timezone(timedelta(hours=5, minutes=30))
+app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH  = os.path.join(BASE_DIR, 'spinny_3dp.db')
 
-<div class="table-card">
-  <div class="table-card-header">
-    <span>Spool-wise Wastage</span>
-  </div>
-  <table>
-    <thead><tr><th>Period</th><th>Status</th><th>City</th><th>Material</th><th style="text-align:center">Issued</th><th style="text-align:center">Actual Used</th><th style="text-align:center">Remaining / Wastage</th><th style="text-align:center">%</th></tr></thead>
-    <tbody>{{ wastage_html|safe }}</tbody>
-  </table>
-</div>
-{% endblock %}
+ACCOUNTS = [
+    {"label":"Pune_Blr_History","token":"AQAI_IPb10d_E9OJD-cxbBW7_CY_qw8T8Qv8yZ8AEuKBIt2YzYoYj2pgMz-APjAVScBFeNOAVV5425tx6GIte-g98L8_Fcm8hZgd7TlxxfdJzt5L1WnkA9urKvE3PfXKFH4ugqYFO34aJTaB","city_override":None},
+    {"label":"Bangalore_New","token":"AQB3PWzBA4I5xpRQEx9x3X35oMnx2KNdD_Gh700Pw7tEdc0ek14YOpH8ByslcCwi-PcYCxcX1CDZc3G8W2rzBNwzXEVvywSTBOmJ-ZodyO8xy5F2OAX25SlDeZAlaojTxI7EiUD0yQsQvssw","city_override":"Bangalore"},
+    {"label":"Hyderabad","token":"AQDByHOAzLNr0YeDJ7bl-NmwVUKlKI_PEoAkXfdd9D2OTKFY2wIABf4BBNTg4VGkRJwxDV7w3WEYnu83rfJMaEcul9rROkKCfflsZg1wbK09Kj45n-xqZ1VVScfpTSpbETvNSVI1Cf7N1MNr","city_override":"Hyderabad"},
+    {"label":"Delhi","token":"AQAD7PzLCRKTwYBhNAFaxH6zVzOR96F2P1lVrsEUTslb7Nf1qJ8jII05YKyZ551Bkju_pThffdA-mJPhsw6HFB184Bzj8zG3KvNMnoHuTl9YrhxZRILd8ALBON33VBnIDtgoN4G0W-aJ8A","city_override":"Delhi"},
+]
+PRINTER_CITY = {
+    "Spinny-02":"Pune","Bengaluru Printer":"Bangalore",
+    "Bengaluru 3D Printer":"Bangalore","Bengaluru 3D Printer ":"Bangalore",
+}
+CITIES = ["Pune","Bangalore","Hyderabad","Delhi"]
+CITY_COLOR = {"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delhi":"#43A047","Unknown":"#90A4AE"}
+STATUS_MAP = {1:"Queued",2:"In Process",3:"Failed",4:"Completed",5:"Cancelled",6:"Failed"}
+API_URL  = "https://api.bambulab.com/v1/user-service/my/tasks"
+SHEETS_URL = os.environ.get("SHEETS_API_URL","")
+
+_sheets = {"orders":[],"designs":[],"pendency":[],"fetched_at":0}
+SHEETS_TTL = 1800
+
+def fetch_sheets(force=False):
+    global _sheets
+    if not SHEETS_URL: return _sheets
+    if not force and time.time()-_sheets["fetched_at"]<SHEETS_TTL: return _sheets
+    try:
+        r = requests.get(SHEETS_URL,timeout=20); d=r.json()
+        if d.get("ok"):
+            _sheets={"orders":d["data"].get("orders",[]),"designs":d["data"].get("designs",[]),"pendency":d["data"].get("pendency",[]),"fetched_at":time.time()}
+    except Exception as e: print(f"[SHEETS] {e}")
+    return _sheets
+
+def get_db():
+    db=sqlite3.connect(DB_PATH, timeout=30)
+    db.row_factory=sqlite3.Row
+    db.execute("PRAGMA journal_mode=DELETE")
+    db.execute("PRAGMA busy_timeout=30000")
+    return db
+
+def init_db():
+    db=get_db()
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS prints (
+            id INTEGER PRIMARY KEY, task_id TEXT UNIQUE,
+            date TEXT, part_name TEXT, printer TEXT, city TEXT,
+            material TEXT, start_time TEXT, end_time TEXT,
+            duration_min INTEGER DEFAULT 0, material_g REAL DEFAULT 0,
+            status TEXT, device_model TEXT DEFAULT '',
+            filament_color TEXT DEFAULT '', ist_done INTEGER DEFAULT 0,
+            cost_time INTEGER DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS sync_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            synced_at TEXT, total_records INTEGER, new_records INTEGER, note TEXT);
+        CREATE TABLE IF NOT EXISTS sheets_cache (
+            key TEXT PRIMARY KEY, data TEXT, updated_at TEXT);
+        CREATE TABLE IF NOT EXISTS stock_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE, unit TEXT DEFAULT 'Kgs', active INTEGER DEFAULT 1);
+        CREATE TABLE IF NOT EXISTS stock_txn (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT, city TEXT, item_id INTEGER,
+            txn_type TEXT, qty REAL, note TEXT DEFAULT '', created_at TEXT);
+        CREATE INDEX IF NOT EXISTS idx_date ON prints(date);
+        CREATE INDEX IF NOT EXISTS idx_city ON prints(city);""")
+    for col in ["ALTER TABLE prints ADD COLUMN ist_done INTEGER DEFAULT 0",
+                "ALTER TABLE prints ADD COLUMN device_model TEXT DEFAULT ''",
+                "ALTER TABLE prints ADD COLUMN filament_color TEXT DEFAULT ''",
+                "ALTER TABLE prints ADD COLUMN cost_time INTEGER DEFAULT 0",
+                "ALTER TABLE stock_items ADD COLUMN reorder_level REAL DEFAULT 0"]:
+        try: db.execute(col)
+        except: pass
+    STOCK_SEED=[("eSUN ABS+ Filament 1.75mm Black","Kgs"),
+        ("eSUN ABS+ Filament 1.75mm White","Kgs"),
+        ("eSUN PLA+ Filament 1.75mm Black","Kgs"),
+        ("eSUN PLA+ Filament 1.75mm White","Kgs"),
+        ("eSUN TPU-95A Filament 1.75mm Black","Kgs"),
+        ("eSUN ePA12 Filament 1.75mm Black","Kgs"),
+        ("eSUN ePA12 Filament 1.75mm White","Kgs"),
+        ("Dye Penetrant Spray","Piece"),
+        ("Glue Stick 3D","Piece"),
+        ("MAX Microfiber Cloth 30x40 cm","Piece"),
+        ("Dettol Alcohol Sanitizer","Piece"),
+        ("3D Printer Gear Grease Lubricant","Piece")]
+    for nm,un in STOCK_SEED:
+        try: db.execute("INSERT OR IGNORE INTO stock_items (name,unit) VALUES (?,?)",(nm,un))
+        except: pass
+    db.commit(); db.close()
+
+def load_sheets_cache():
+    global _sheets
+    try:
+        db=sqlite3.connect(DB_PATH)
+        row=db.execute("SELECT data FROM sheets_cache WHERE key='sheets_data'").fetchone()
+        if row:
+            cached=_json.loads(row[0])
+            _sheets={"orders":cached.get("orders",[]),"designs":cached.get("designs",[]),"pendency":cached.get("pendency",[]),"fetched_at":time.time()}
+        db.close()
+    except Exception as e: print(f"[CACHE] Load error: {e}")
+
+def save_sheets_cache():
+    try:
+        db=get_db()
+        db.execute("INSERT OR REPLACE INTO sheets_cache (key,data,updated_at) VALUES (?,?,?)",
+            ("sheets_data",_json.dumps({"orders":_sheets["orders"],"designs":_sheets["designs"],"pendency":_sheets["pendency"]}),
+            datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")))
+        db.commit(); db.close()
+    except Exception as e: print(f"[CACHE] Save error: {e}")
+
+import hashlib, base64 as _b64
+GH_TOKEN=os.environ.get("GH_TOKEN","")
+GH_REPO=os.environ.get("GH_BACKUP_REPO","")
+GH_PATH="crm_backup.json"
+_backup_state={"last":"never","hash":"","error":""}
+
+def _gh_headers(raw=False):
+    h={"Authorization":f"Bearer {GH_TOKEN}","X-GitHub-Api-Version":"2022-11-28"}
+    h["Accept"]="application/vnd.github.raw+json" if raw else "application/vnd.github+json"
+    return h
+
+def collect_backup():
+    db=get_db()
+    data={"prints":[dict(r) for r in db.execute("SELECT * FROM prints").fetchall()],
+          "stock_items":[dict(r) for r in db.execute("SELECT * FROM stock_items").fetchall()],
+          "stock_txn":[dict(r) for r in db.execute("SELECT * FROM stock_txn").fetchall()],
+          "sheets":{"orders":_sheets["orders"],"designs":_sheets["designs"],"pendency":_sheets["pendency"]}}
+    db.close(); return data
+
+def do_backup(force=False):
+    global _backup_state
+    if not GH_TOKEN or not GH_REPO:
+        _backup_state["error"]="GH_TOKEN / GH_BACKUP_REPO env vars not set"; return False
+    try:
+        data=collect_backup()
+        core=_json.dumps(data,sort_keys=True,default=str)
+        h=hashlib.md5(core.encode()).hexdigest()
+        if h==_backup_state["hash"] and not force:
+            return True
+        now=datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+        data["backed_up_at"]=now
+        b64=_b64.b64encode(_json.dumps(data,default=str).encode()).decode()
+        url=f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
+        sha=None
+        r=requests.get(url,headers=_gh_headers(),timeout=30)
+        if r.status_code==200: sha=r.json().get("sha")
+        body={"message":f"CRM auto-backup {now} [skip render]","content":b64}
+        if sha: body["sha"]=sha
+        r=requests.put(url,headers=_gh_headers(),json=body,timeout=90)
+        if r.status_code in (200,201):
+            _backup_state={"last":now,"hash":h,"error":""}
+            return True
+        _backup_state["error"]=f"GitHub API {r.status_code}"; return False
+    except Exception as e:
+        _backup_state["error"]=str(e); return False
+
+def backup_async():
+    threading.Thread(target=do_backup,daemon=True).start()
+
+def restore_from_github():
+    if not GH_TOKEN or not GH_REPO: return
+    try:
+        db=get_db()
+        pc=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
+        sc=db.execute("SELECT COUNT(*) FROM stock_txn").fetchone()[0]
+        if pc>0 and sc>0: db.close(); return
+        url=f"https://api.github.com/repos/{GH_REPO}/contents/{GH_PATH}"
+        r=requests.get(url,headers=_gh_headers(raw=True),timeout=90)
+        if r.status_code!=200:
+            db.close(); return
+        d=_json.loads(r.text)
+        if pc==0:
+            for p in d.get("prints",[]):
+                try:
+                    db.execute("""INSERT OR IGNORE INTO prints
+                        (task_id,date,part_name,printer,city,material,start_time,end_time,duration_min,material_g,status,device_model,filament_color,ist_done,cost_time)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (p.get("task_id"),p.get("date",""),p.get("part_name",""),p.get("printer",""),p.get("city",""),
+                         p.get("material",""),p.get("start_time",""),p.get("end_time",""),p.get("duration_min",0),
+                         p.get("material_g",0),p.get("status",""),p.get("device_model",""),p.get("filament_color",""),
+                         p.get("ist_done",0),p.get("cost_time",0)))
+                except: pass
+        if sc==0:
+            for it in d.get("stock_items",[]):
+                try: db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active,reorder_level) VALUES (?,?,?,?,?)",
+                        (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1),it.get("reorder_level",0)))
+                except: pass
+            for t in d.get("stock_txn",[]):
+                try:
+                    db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                        (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at","")))
+                except: pass
+        db.commit(); db.close()
+        global _sheets
+        sh=d.get("sheets",{})
+        if sh.get("orders") or sh.get("designs"):
+            _sheets={"orders":sh.get("orders",[]),"designs":sh.get("designs",[]),"pendency":sh.get("pendency",[]),"fetched_at":time.time()}
+            save_sheets_cache()
+    except Exception as e: print(f"[RESTORE] Error: {e}")
+
+def auto_backup_loop():
+    time.sleep(120)
+    while True:
+        do_backup()
+        time.sleep(1800)
+
+def parse_dt(v):
+    if not v: return None
+    try:
+        s=str(v)
+        if 'T' in s: return datetime.strptime(s.replace('Z','').split('.')[0],"%Y-%m-%dT%H:%M:%S")
+        iv=int(float(s))
+        if iv>1e12: iv//=1000
+        return datetime.fromtimestamp(iv) if iv>0 else None
+    except: return None
+
+def get_material(t):
+    try:
+        ams=t.get("amsDetailMapping") or []
+        if isinstance(ams,list) and ams:
+            types={m.get("filamentType") or m.get("sourceColor","") for m in ams if m}
+            types=[x for x in types if x]
+            if types: return "+".join(sorted(types))
+        ft=t.get("filamentType","")
+        if ft: return ft
+    except: pass
+    return "ABS"
+
+def compute_record(t, acc):
+    st=parse_dt(t.get("startTime")); et=parse_dt(t.get("endTime"))
+    cost=int(t.get("costTime") or 0)
+    d_wall = int((et-st).total_seconds()/60) if (st and et and et>st) else 0
+    d_cost = cost//60 if (60<=cost<=86400) else 0
+    if 0 < d_wall <= 1440:
+        if d_cost and d_wall > d_cost*1.5 and (d_wall - d_cost) > 120:
+            dur = d_cost
+        else:
+            dur = d_wall
+    elif d_cost:
+        dur = d_cost
+    else:
+        dur = 0
+    status=STATUS_MAP.get(int(t.get("status") or 0),str(t.get("status","")))
+    if status in ("Queued","In Process") and et and (datetime.utcnow()-et).total_seconds()>300:
+        status="Completed"
+    if status=="Queued" and et:
+        status="Completed"
+    st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
+    if st_ist and dur>0 and status!="In Process":
+        et_ist=st_ist+timedelta(minutes=dur)
+    elif et:
+        et_ist=et.replace(tzinfo=timezone.utc).astimezone(IST)
+    else:
+        et_ist=None
+    printer=t.get("deviceName","Unknown")
+    city=acc["city_override"] or PRINTER_CITY.get(printer.strip(),"Unknown")
+    fil_color=""
+    try:
+        ams=t.get("amsDetailMapping") or []
+        if isinstance(ams,list) and ams and isinstance(ams[0],dict):
+            fil_color=ams[0].get("sourceColor","")[:6]
+    except: pass
+    return {
+        "date": st_ist.strftime("%Y-%m-%d") if st_ist else "",
+        "part": t.get("title","Unknown"),
+        "printer": printer, "city": city, "material": get_material(t),
+        "start": st_ist.strftime("%Y-%m-%d %H:%M") if st_ist else "",
+        "end": et_ist.strftime("%Y-%m-%d %H:%M") if et_ist else "",
+        "dur": dur, "matg": round(float(t.get("weight") or 0),2),
+        "status": status, "model": t.get("deviceModel",""),
+        "color": fil_color, "cost": cost,
+    }
+
+def dedup_prints(db):
+    rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min
+                       FROM prints
+                       WHERE start_time!='' AND end_time!='' AND LENGTH(end_time)>10
+                         AND printer NOT IN ('','Unknown')
+                         AND duration_min>0 AND duration_min<=1440
+                       ORDER BY printer,start_time""").fetchall()
+    by_printer=defaultdict(list)
+    for r in rows:
+        try:
+            st=datetime.strptime(r[2],"%Y-%m-%d %H:%M")
+            et=datetime.strptime(r[3],"%Y-%m-%d %H:%M")
+            if et<=st: continue
+            by_printer[r[1]].append({"id":r[0],"st":st,"et":et,"status":r[4]})
+        except: pass
+    rank={"Completed":5,"Failed":4,"Cancelled":3,"In Process":2,"Queued":1}
+    to_del=set()
+    for printer,jobs in by_printer.items():
+        jobs.sort(key=lambda x:x["st"])
+        kept=[]
+        for j in jobs:
+            clash=None
+            for k in kept:
+                if j["st"]<k["et"] and k["st"]<j["et"]:
+                    clash=k; break
+            if clash:
+                if rank.get(j["status"],0)>rank.get(clash["status"],0):
+                    to_del.add(clash["id"]); kept.remove(clash); kept.append(j)
+                else:
+                    to_del.add(j["id"])
+            else:
+                kept.append(j)
+    for d in to_del:
+        db.execute("DELETE FROM prints WHERE id=?",(d,))
+    db.commit()
+    return len(to_del)
+
+def startup_fixes():
+    if not os.path.exists(DB_PATH): return
+    db=sqlite3.connect(DB_PATH)
+    try:
+        db.execute("UPDATE prints SET status='Completed' WHERE status IN ('In Process','Printing','Queued') AND end_time IS NOT NULL AND end_time!='' AND LENGTH(end_time)>10")
+        db.execute("DELETE FROM prints WHERE status NOT IN ('Completed','Failed','Cancelled')")
+        db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'")
+        db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
+        db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
+        db.commit()
+        dedup_prints(db)
+    except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
+    finally: db.close()
+
+def fetch_tasks(token):
+    s=requests.Session(); s.headers.update({"Authorization":f"Bearer {token}"})
+    tasks,offset=[],0
+    while True:
+        for attempt in range(3):
+            try: r=s.get(API_URL,params={"limit":100,"offset":offset},timeout=30); data=r.json(); break
+            except:
+                if attempt==2: return tasks
+                time.sleep(3)
+        batch=data.get("hits") or data.get("data") or []
+        if not batch: break
+        tasks.extend(batch)
+        if len(tasks)>=data.get("total",0) or len(batch)<100: break
+        offset+=100
+    return tasks
+
+def do_sync():
+    all_records = []
+    for acc in ACCOUNTS:
+        tasks=fetch_tasks(acc["token"])
+        for t in tasks:
+            tid=str(t.get("id",""))
+            if not tid: continue
+            rec=compute_record(t, acc)
+            all_records.append((tid, rec))
+    db=get_db()
+    existing=set(r[0] for r in db.execute("SELECT task_id FROM prints").fetchall())
+    new_count=0; upd_count=0
+    for tid, rec in all_records:
+        if rec["status"] not in ("Completed","Failed","Cancelled"):
+            if tid in existing:
+                db.execute("DELETE FROM prints WHERE task_id=?",(tid,))
+            continue
+        if tid in existing:
+            db.execute("""UPDATE prints SET date=?,part_name=?,printer=?,city=?,material=?,
+                start_time=?,end_time=?,duration_min=?,material_g=?,status=?,device_model=?,
+                filament_color=?,cost_time=?,ist_done=1 WHERE task_id=?""",
+                (rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
+                 rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
+                 rec["color"],rec["cost"],tid))
+            upd_count+=1
+        else:
+            db.execute("""INSERT OR IGNORE INTO prints
+                (task_id,date,part_name,printer,city,material,start_time,end_time,
+                 duration_min,material_g,status,device_model,filament_color,ist_done,cost_time)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)""",
+                (tid,rec["date"],rec["part"],rec["printer"],rec["city"],rec["material"],
+                 rec["start"],rec["end"],rec["dur"],rec["matg"],rec["status"],rec["model"],
+                 rec["color"],rec["cost"]))
+            existing.add(tid); new_count+=1
+    total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
+    db.execute("INSERT INTO sync_log (synced_at,total_records,new_records,note) VALUES (?,?,?,?)",
+               (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),total,new_count,f"upd:{upd_count}"))
+    db.commit(); db.close()
+    startup_fixes()
+    return new_count
+
+def auto_sync_loop():
+    try: do_sync()
+    except Exception as e: print(f"[SYNC] Startup error: {e}")
+    while True:
+        time.sleep(7200)
+        try: do_sync()
+        except Exception as e: print(f"[SYNC] Error: {e}")
+
+HOURS_SQL = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)"
+MAT_SQL   = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0)"
+
+def build_recent_html(rows, today):
+    html=""
+    for row in rows:
+        r=tuple(row)
+        r_date=_html.escape(str(r[0] or "")); r_part=_html.escape(str(r[1] or "")); r_city=_html.escape(str(r[3] or ""))
+        r_dur=int(r[5] or 0); r_matg=r[6] or 0
+        r_status=_html.escape(str(r[7] or "")); r_st=str(r[8] or ""); r_et=str(r[9] or "")
+        st_hm=r_st[11:16] if len(r_st)>10 else "-"
+        et_hm=r_et[11:16] if len(r_et)>10 else "-"
+        cc=CITY_COLOR.get(r_city,"#999")
+        dur_str=(f"{r_dur//60}h {r_dur%60}m" if r_dur>=60 else f"{r_dur}m") if r_dur>0 else "-"
+        et_cell=et_hm if et_hm!="-" else "-"
+        if r_status=="Completed":    badge="<span class='badge b-completed'>&#10003; Done</span>"
+        elif r_status=="Failed":     badge="<span class='badge b-failed'>&#10007; Failed</span>"
+        elif r_status=="Cancelled":  badge="<span class='badge b-cancelled'>&#8856; Cancelled</span>"
+        else:                        badge=f"<span class='badge b-cancelled'>{r_status}</span>"
+        html+=(f"<tr><td class='mono'>{r_date}</td>"
+               f"<td class='td-part' title='{r_part}'>{r_part}</td>"
+               f"<td><span class='b-city' style='background:{cc}'>{r_city}</span></td>"
+               f"<td class='mono' style='color:#1d4ed8;font-weight:600'>{st_hm}</td>"
+               f"<td class='mono' style='color:#7c3aed;font-weight:600'>{et_cell}</td>"
+               f"<td class='mono' style='font-weight:600'>{dur_str}</td>"
+               f"<td class='mono'>{r_matg}g</td><td>{badge}</td></tr>")
+    return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No prints yet</td></tr>"
+
+def build_daily_html(db, today):
+    dates=db.execute("SELECT DISTINCT date FROM prints WHERE date!='' ORDER BY date DESC LIMIT 30").fetchall()
+    html=""; cc={"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delhi":"#43A047"}
+    for drow in dates:
+        d=str(drow[0]); total_p=0; total_h=0.0; total_m=0; cells=""
+        for cn in CITIES:
+            r=db.execute(f"SELECT COUNT(*),COALESCE(ROUND({HOURS_SQL}/60.0,1),0),COALESCE(ROUND({MAT_SQL},0),0) FROM prints WHERE date=? AND city=?",(d,cn)).fetchone()
+            p,h,m=int(r[0] or 0),float(r[1] or 0),int(r[2] or 0)
+            total_p+=p; total_h+=h; total_m+=m
+            if p>0: cells+=f"<td class='mono'><span style='color:{cc[cn]};font-weight:600'>{p}</span> <span style='font-size:11px;color:#9ca3af'>({h}h)</span></td>"
+            else:   cells+="<td class='mono' style='color:#d1d5db'>-</td>"
+        rs=f"style='background:rgba(233,30,99,0.07);font-weight:700'" if d==today else ""
+        ds=f"style='color:#e91e63'" if d==today else ""
+        dot=" &#9679;" if d==today else ""
+        html+=f"<tr {rs}><td class='mono' {ds}>{d}{dot}</td>{cells}<td class='mono' style='font-weight:700'>{total_p}</td><td class='mono' style='font-weight:700'>{round(total_h,1)}h</td><td class='mono'>{total_m}g</td></tr>"
+    return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No data - click Sync Now</td></tr>"
+
+@app.route('/')
+def dashboard():
+    db=get_db(); today=date.today().strftime("%Y-%m-%d")
+    total    =db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
+    completed=db.execute("SELECT COUNT(*) FROM prints WHERE status='Completed'").fetchone()[0]
+    failed   =db.execute("SELECT COUNT(*) FROM prints WHERE status='Failed'").fetchone()[0]
+    cancelled=db.execute("SELECT COUNT(*) FROM prints WHERE status='Cancelled'").fetchone()[0]
+    in_proc  =db.execute("SELECT COUNT(*) FROM prints WHERE status='In Process'").fetchone()[0]
+    hrs_total=db.execute(f"SELECT {HOURS_SQL}/60.0 FROM prints WHERE status IN ('Completed','In Process','Failed')").fetchone()[0]
+    mat_total=db.execute(f"SELECT {MAT_SQL}/1000.0 FROM prints WHERE status IN ('Completed','In Process','Failed')").fetchone()[0]
+    cities_today={}
+    for c in CITIES:
+        r=db.execute(f"""SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL},
+            COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+            COALESCE(SUM(CASE WHEN status='In Process' THEN 1 ELSE 0 END),0)
+            FROM prints WHERE city=? AND date=?""",(c,today)).fetchone()
+        cities_today[c]={"prints":r[0],"hours":round(float(r[1] or 0),1),"mat_g":round(float(r[2] or 0),1),"ok":r[3],"live":r[4],"color":CITY_COLOR[c]}
+    today_total={"prints":sum(v["prints"] for v in cities_today.values()),"ok":sum(v["ok"] for v in cities_today.values()),
+                 "live":sum(v["live"] for v in cities_today.values()),"hours":round(sum(v["hours"] for v in cities_today.values()),1),
+                 "mat_g":round(sum(v["mat_g"] for v in cities_today.values()),1),
+                 "failed":db.execute("SELECT COUNT(*) FROM prints WHERE date=? AND status='Failed'",(today,)).fetchone()[0]}
+    recent_rows=db.execute("SELECT date,part_name,printer,city,material,duration_min,material_g,status,start_time,end_time FROM prints WHERE date!='' ORDER BY date DESC,start_time DESC LIMIT 25").fetchall()
+    recent_html=build_recent_html(recent_rows,today)
+    daily_rows_html=build_daily_html(db,today)
+    last_sync=db.execute("SELECT synced_at,total_records FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+    sheets=_sheets; orders=sheets.get("orders",[]); designs=sheets.get("designs",[])
+    ord_city={}
+    for c in CITIES:
+        co=[o for o in orders if o.get("order_city")==c]
+        ord_city[c]={"total":len(co),"fulfilled":len([o for o in co if "fulfilled" in o.get("status","").lower()]),"pending":len([o for o in co if o.get("status","").lower() not in ["fulfilled","cancelled",""]])}
+    today_designs=[d for d in designs if d.get("printed_date","")==today]
+    month_designs=[d for d in designs if str(d.get("printed_date","")).startswith(today[:7])]
+    db.close()
+    return render_template('dashboard.html',
+        total=total,completed=completed,failed=failed,cancelled=cancelled,in_proc=in_proc,
+        hrs_total=round(float(hrs_total or 0),1),mat_total=round(float(mat_total or 0),2),
+        cities_today=cities_today,today_total=today_total,
+        recent_html=recent_html,daily_rows_html=daily_rows_html,
+        last_sync=last_sync,today=today,city_color=CITY_COLOR,cities=CITIES,
+        ord_city=ord_city,total_orders=len(orders),
+        today_designs=today_designs,month_designs=month_designs,total_designs=len(designs))
+
+@app.route('/city/<city>')
+def city_page(city):
+    if city not in CITIES: return redirect('/')
+    db=get_db(); today=date.today().strftime("%Y-%m-%d")
+    ov=db.execute(f"""SELECT COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+        {HOURS_SQL}/60.0,{MAT_SQL}/1000.0 FROM prints WHERE city=?""",(city,)).fetchone()
+    td=db.execute(f"SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL} FROM prints WHERE city=? AND date=?",(city,today)).fetchone()
+    rows=db.execute("SELECT date,part_name,printer,material,start_time,end_time,duration_min,material_g,status,device_model,filament_color FROM prints WHERE city=? ORDER BY date DESC,start_time DESC",(city,)).fetchall()
+    db.close()
+    return render_template('city.html',city=city,color=CITY_COLOR[city],
+        ov=ov,td=td,rows=rows,today=today,city_color=CITY_COLOR,cities=CITIES)
+
+@app.route('/monthly')
+def monthly():
+    db=get_db()
+    rows=db.execute(f"""SELECT substr(date,1,7) as mo,city,COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+        ROUND({HOURS_SQL}/60.0,1),ROUND({MAT_SQL}/1000.0,3)
+        FROM prints WHERE date!='' GROUP BY mo,city ORDER BY mo DESC,city""").fetchall()
+    md=defaultdict(lambda:{c:{"total":0,"done":0,"failed":0,"hours":0,"mat_kg":0} for c in CITIES})
+    for r in rows:
+        if r[1] in CITIES: md[r[0]][r[1]]={"total":r[2],"done":r[3],"failed":r[4],"hours":r[5],"mat_kg":r[6]}
+    months_list=[]
+    for mo in sorted(md.keys(),reverse=True):
+        cd=md[mo]; months_list.append((mo,cd,sum(v["total"] for v in cd.values()),sum(v["done"] for v in cd.values()),sum(v["failed"] for v in cd.values()),round(sum(v["hours"] for v in cd.values()),1),round(sum(v["mat_kg"] for v in cd.values()),2)))
+    db.close()
+    return render_template('monthly.html',months_list=months_list,city_color=CITY_COLOR,cities=CITIES)
+
+def fil_name(mat,col):
+    m=(mat or "").upper(); c=(col or "").lower().strip()
+    try:
+        rv=int(c[0:2],16); gv=int(c[2:4],16); bv=int(c[4:6],16)
+        white=(rv>200 and gv>200 and bv>200)
+    except: white=False
+    if "ABS" in m: return "eSun ABS+ "+("White" if white else "Black")
+    elif "PLA" in m: return "eSUN PLA+ "+("White" if white else "Black")
+    elif "TPU" in m: return "eSUN TPU-95A"
+    elif "PA" in m: return "eSUN ePA12"
+    return mat or "Unknown"
+
+CATEGORY_TO_ITEM = {
+    "eSun ABS+ Black":"eSUN ABS+ Filament 1.75mm Black",
+    "eSun ABS+ White":"eSUN ABS+ Filament 1.75mm White",
+    "eSUN PLA+ Black":"eSUN PLA+ Filament 1.75mm Black",
+    "eSUN PLA+ White":"eSUN PLA+ Filament 1.75mm White",
+    "eSUN TPU-95A":"eSUN TPU-95A Filament 1.75mm Black",
+    "eSUN ePA12":"eSUN ePA12 Filament 1.75mm Black",
+}
+ITEM_TO_CATEGORY = {v:k for k,v in CATEGORY_TO_ITEM.items()}
+ITEM_TO_CATEGORY["eSUN ePA12 Filament 1.75mm White"] = "eSUN ePA12"
+
+@app.route('/materials')
+def materials():
+    db=get_db()
+    FILS=["eSun ABS+ Black","eSun ABS+ White","eSUN PLA+ Black","eSUN PLA+ White","eSUN TPU-95A","eSUN ePA12"]
+
+    raw=db.execute("""SELECT material,filament_color,COUNT(*),
+        COALESCE(SUM(material_g),0)/1000.0,
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
+        FROM prints WHERE status IN ('Completed','Failed') GROUP BY material,filament_color ORDER BY 4 DESC""").fetchall()
+    fil_total={}
+    for fn in FILS: fil_total[fn]={"parts":0,"kg":0.0,"failed":0}
+    fil_total["Other"]={"parts":0,"kg":0.0,"failed":0}
+    for r in raw:
+        fn=fil_name(r[0],r[1])
+        if fn not in fil_total: fn="Other"
+        fil_total[fn]["parts"]+=r[2]; fil_total[fn]["kg"]+=round(float(r[3]),3); fil_total[fn]["failed"]+=r[4]
+    top=[(k,v) for k,v in fil_total.items() if v["kg"]>0]
+    top.sort(key=lambda x:x[1]["kg"],reverse=True)
+
+    mraw=db.execute("""SELECT substr(date,1,7) as mo,city,material,filament_color,
+        COUNT(*),COALESCE(SUM(material_g),0)/1000.0,
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
+        FROM prints WHERE date!='' AND status IN ('Completed','Failed')
+        GROUP BY mo,city,material,filament_color ORDER BY 1 DESC,2,3""").fetchall()
+
+    months_set=set(); _mdata={}
+    for r in mraw:
+        mo,city,mat,col=r[0],r[1],r[2],r[3]
+        fn=fil_name(mat,col)
+        if fn not in FILS: fn="Other"
+        months_set.add(mo)
+        if mo not in _mdata: _mdata[mo]={}
+        if city not in _mdata[mo]: _mdata[mo][city]={}
+        if fn not in _mdata[mo][city]: _mdata[mo][city][fn]={"parts":0,"kg":0.0,"failed":0}
+        _mdata[mo][city][fn]["parts"]+=r[4]
+        _mdata[mo][city][fn]["kg"]+=round(float(r[5]),3)
+        _mdata[mo][city][fn]["failed"]+=r[6]
+
+    months_list=sorted(months_set,reverse=True)[:6]
+    sel_mo=request.args.get("mo",months_list[0] if months_list else "")
+
+    db.close()
+    return render_template('materials.html',top=top,mdata=_mdata,months_list=months_list,
+        sel_mo=sel_mo,filaments=FILS,city_color=CITY_COLOR,cities=CITIES)
+
+@app.route('/fails')
+def fails():
+    db=get_db()
+    rows=db.execute("SELECT date,part_name,printer,city,material,duration_min,material_g,status FROM prints WHERE status IN ('Failed','Cancelled') ORDER BY date DESC").fetchall()
+    top=db.execute("SELECT part_name,COUNT(*),city FROM prints WHERE status IN ('Failed','Cancelled') GROUP BY part_name ORDER BY 2 DESC LIMIT 20").fetchall()
+    db.close()
+    return render_template('fails.html',rows=rows,top=top,city_color=CITY_COLOR,cities=CITIES)
+
+@app.route('/orders')
+def orders():
+    data=fetch_sheets(force=False); all_orders=data.get("orders",[])
+    cf=request.args.get("city","All"); sf=request.args.get("status","All")
+    filtered=all_orders
+    if cf!="All": filtered=[o for o in filtered if o.get("order_city")==cf or o.get("source_city")==cf]
+    if sf!="All": filtered=[o for o in filtered if sf.lower() in o.get("status","").lower()]
+    filtered=sorted(filtered,key=lambda x:x.get("date",""),reverse=True)
+    city_stats={}
+    for c in CITIES:
+        co=[o for o in all_orders if o.get("order_city")==c]
+        city_stats[c]={"total":len(co),"fulfilled":len([o for o in co if "fulfilled" in o.get("status","").lower()]),"pending":len([o for o in co if o.get("status","").lower() not in ["fulfilled","cancelled",""]]),"color":CITY_COLOR[c]}
+    _daily=defaultdict(lambda:{c:0 for c in CITIES})
+    for o in all_orders:
+        d=o.get("date",""); oc=o.get("order_city","")
+        if d and oc in CITIES: _daily[d][oc]+=1
+    daily_summary=sorted(_daily.items(),key=lambda x:x[0],reverse=True)[:30]
+    today_date=date.today().strftime("%Y-%m-%d")
+    statuses=sorted(set(o.get("status","") for o in all_orders if o.get("status","")))
+    return render_template('orders.html',orders=filtered,city_stats=city_stats,city_filter=cf,
+        status_filter=sf,statuses=statuses,city_color=CITY_COLOR,cities=CITIES,
+        total=len(all_orders),daily_summary=daily_summary,today_date=today_date)
+
+@app.route('/designs')
+def designs():
+    data=fetch_sheets(force=False); all_designs=data.get("designs",[])
+    today_str=date.today().strftime("%Y-%m-%d")
+    all_designs=sorted(all_designs,key=lambda x:x.get("printed_date","") or x.get("design_date",""),reverse=True)
+    today_list=[d for d in all_designs if d.get("printed_date","")==today_str]
+    filter_today=request.args.get("filter","")
+    filter_date=request.args.get("date","")
+    if filter_today=="today":
+        show_designs=today_list
+    elif filter_date:
+        show_designs=[d for d in all_designs if d.get("printed_date","")==filter_date]
+    else:
+        show_designs=all_designs
+    _daily=defaultdict(lambda:{c:0 for c in CITIES})
+    for d in all_designs:
+        dd=d.get("printed_date",""); dc=d.get("city","")
+        if dd and dd<=today_str and dc in CITIES: _daily[dd][dc]+=1
+    daily_summary=sorted(_daily.items(),key=lambda x:x[0],reverse=True)[:30]
+    return render_template('designs.html',designs=show_designs,all_count=len(all_designs),
+        city_color=CITY_COLOR,cities=CITIES,today_count=len(today_list),
+        filter_today=filter_today,filter_date=filter_date,today_str=today_str,
+        daily_summary=daily_summary)
+
+def _fmt_qty(v):
+    v=float(v or 0)
+    return str(int(v)) if v==int(v) else f"{v:g}"
+
+@app.route('/stock')
+def stock_page():
+    db=get_db(); cf=request.args.get("city","All")
+    items=db.execute("SELECT * FROM stock_items WHERE active=1 ORDER BY unit DESC,id").fetchall()
+    txns=db.execute("SELECT t.*,i.name AS iname,i.unit AS iunit FROM stock_txn t JOIN stock_items i ON i.id=t.item_id ORDER BY t.id DESC").fetchall()
+    agg=defaultdict(lambda:{"OPENING":0.0,"PURCHASE":0.0,"ISSUE":0.0})
+    for t in txns: agg[(t["city"],t["item_id"])][t["txn_type"]]+=float(t["qty"] or 0)
+    def cur(city,iid):
+        a=agg[(city,iid)]; return a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
+    if cf=="All":
+        head="".join(f"<th style='text-align:center;padding:10px 8px;color:{CITY_COLOR[c]};font-weight:700;border-bottom:2px solid #e5e7eb'>{c}</th>" for c in CITIES)
+        rows=""
+        for it in items:
+            rl=float(it["reorder_level"] or 0)
+            tot=sum(cur(c,it["id"]) for c in CITIES)
+            cells=""
+            for c in CITIES:
+                v=cur(c,it["id"])
+                if v<=0: col="#dc2626"; warn="⚠ "
+                elif rl>0 and v<=rl: col="#d97706"; warn="⚠ "
+                else: col="#111827"; warn=""
+                cells+=f"<td style='text-align:center;padding:9px 8px;font-weight:600;color:{col}'>{warn}{_fmt_qty(v)}</td>"
+            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
+                f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>{cells}"
+                f"<td style='text-align:center;padding:9px 8px;font-weight:700'>{_fmt_qty(tot)}</td></tr>")
+        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f9fafb'>"
+            f"<th style='text-align:left;padding:10px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Material</th>"
+            f"<th style='text-align:left;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Unit</th>{head}"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Total</th></tr></thead><tbody>{rows}</tbody></table>")
+    else:
+        rows=""
+        for it in items:
+            rl=float(it["reorder_level"] or 0)
+            a=agg[(cf,it["id"])]; v=a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
+            if v<=0: col="#dc2626"; warn="⚠ "
+            elif rl>0 and v<=rl: col="#d97706"; warn="⚠ "
+            else: col="#111827"; warn=""
+            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
+                f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>"
+                f"<td style='text-align:center;padding:9px 8px'>{_fmt_qty(a['OPENING'])}</td>"
+                f"<td style='text-align:center;padding:9px 8px;color:#16a34a'>+{_fmt_qty(a['PURCHASE'])}</td>"
+                f"<td style='text-align:center;padding:9px 8px;color:#dc2626'>−{_fmt_qty(a['ISSUE'])}</td>"
+                f"<td style='text-align:center;padding:9px 8px;font-weight:700;color:{col}'>{warn}{_fmt_qty(v)}</td></tr>")
+        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f9fafb'>"
+            f"<th style='text-align:left;padding:10px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Material</th>"
+            f"<th style='text-align:left;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Unit</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Opening</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Purchased</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Issued/Used</th>"
+            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Current Stock</th></tr></thead><tbody>{rows}</tbody></table>")
+    tabs=""
+    for c in ["All"]+CITIES:
+        on=(c==cf)
+        tabs+=(f"<a href='/stock?city={c}' style='text-decoration:none'><div style='padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;"
+            f"background:{'#e91e63' if on else '#fff'};color:{'#fff' if on else '#374151'};border:2px solid {'#e91e63' if on else '#e5e7eb'}'>{c}</div></a>")
+    show=[t for t in txns if cf=="All" or t["city"]==cf][:50]
+    TYPE_BADGE={"OPENING":("🏁 Opening","#6366f1"),"PURCHASE":("🛒 Purchase","#16a34a"),"ISSUE":("📤 Issue","#dc2626")}
+    log_rows=""
+    for t in show:
+        lb,tc=TYPE_BADGE.get(t["txn_type"],(t["txn_type"],"#6b7280"))
+        sign="−" if t["txn_type"]=="ISSUE" else "+"
+        log_rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
+            f"<td style='padding:8px 12px;white-space:nowrap;color:#6b7280'>{t['date']}</td>"
+            f"<td style='padding:8px 10px'><span style='color:{CITY_COLOR.get(t['city'],'#6b7280')};font-weight:600'>{t['city']}</span></td>"
+            f"<td style='padding:8px 10px'>{_html.escape(t['iname'])}</td>"
+            f"<td style='padding:8px 10px;color:{tc};font-weight:600;white-space:nowrap'>{lb}</td>"
+            f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{tc}'>{sign}{_fmt_qty(t['qty'])} {t['iunit']}</td>"
+            f"<td style='padding:8px 10px;color:#6b7280'>{_html.escape(t['note'] or '')}</td>"
+            f"<td style='padding:8px 10px;text-align:center'><button onclick='delTxn({t['id']})' style='background:none;border:none;cursor:pointer;color:#dc2626;font-size:14px' title='Delete entry'>🗑</button></td></tr>")
+    if not log_rows: log_rows="<tr><td colspan='7' style='padding:20px;text-align:center;color:#9ca3af'>No entries yet</td></tr>"
+    item_options="".join(f"<option value='{it['id']}'>{_html.escape(it['name'])} ({it['unit']})</option>" for it in items)
+    city_options="".join(f"<option value='{c}'>{c}</option>" for c in CITIES)
+    reorder_rows=""
+    for it in items:
+        reorder_rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
+            f"<td style='padding:8px 14px'>{_html.escape(it['name'])}</td>"
+            f"<td style='padding:8px 8px;color:#6b7280'>{it['unit']}</td>"
+            f"<td style='padding:8px 8px;text-align:center'><input type='number' step='0.1' id='reorder_{it['id']}' value='{it['reorder_level'] or 0}' style='width:80px;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;text-align:center'></td>"
+            f"<td style='padding:8px 8px;text-align:center'><button onclick='saveReorder({it['id']})' style='padding:5px 14px;background:#111827;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer'>Save</button></td></tr>")
+    db.close()
+    return render_template('stock.html',summary_html=summary_html,tabs_html=tabs,
+        log_html=log_rows,item_options=item_options,city_options=city_options,
+        reorder_html=reorder_rows,
+        city_filter=cf,today=date.today().strftime("%Y-%m-%d"),txn_count=len(txns),
+        backup_last=_backup_state["last"],backup_on=bool(GH_TOKEN and GH_REPO))
+
+def compute_wastage():
+    db=get_db()
+    today=date.today().strftime("%Y-%m-%d")
+    tomorrow=(date.today()+timedelta(days=1)).strftime("%Y-%m-%d")
+    items=db.execute("SELECT * FROM stock_items WHERE unit='Kgs' AND active=1").fetchall()
+    out=[]
+    for it in items:
+        cat=ITEM_TO_CATEGORY.get(it["name"])
+        if not cat: continue
+        for c in CITIES:
+            issues=db.execute("SELECT date,qty FROM stock_txn WHERE city=? AND item_id=? AND txn_type='ISSUE' ORDER BY date ASC,id ASC",(c,it["id"])).fetchall()
+            by_date={}
+            order=[]
+            for row in issues:
+                d=row["date"]
+                if d not in by_date:
+                    by_date[d]=0.0
+                    order.append(d)
+                by_date[d]+=float(row["qty"] or 0)
+            for i,start_d in enumerate(order):
+                is_last = (i+1==len(order))
+                end_d_query = order[i+1] if not is_last else tomorrow
+                period_end_display = order[i+1] if not is_last else today
+                prints=db.execute("SELECT material,filament_color,material_g FROM prints WHERE city=? AND date>=? AND date<? AND status IN ('Completed','Failed')",(c,start_d,end_d_query)).fetchall()
+                actual_g=sum(float(p["material_g"] or 0) for p in prints if fil_name(p["material"],p["filament_color"])==cat)
+                issued_g=by_date[start_d]*1000
+                diff_g=issued_g-actual_g
+                pct=(diff_g/issued_g*100) if issued_g>0 else 0
+                out.append({"city":c,"material":it["name"],"date":start_d,"period_end":period_end_display,
+                    "issued_g":round(issued_g,1),"actual_g":round(actual_g,1),
+                    "diff_g":round(diff_g,1),"pct":round(pct,1),
+                    "status":"ongoing" if is_last else "closed"})
+    db.close()
+    out.sort(key=lambda x:x["date"],reverse=True)
+    return out
+
+def build_wastage_html(rows):
+    if not rows:
+        return "<tr><td colspan='8' style='padding:24px;text-align:center;color:#9ca3af'>No Issue entries found yet — add an Issue entry on the Daily Materials page first, then wastage will be calculated</td></tr>"
+    html=""
+    for r in rows:
+        if r["status"]=="ongoing":
+            status_badge="<span style='background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>🔄 Ongoing</span>"
+            label="Remaining"
+            col="#6b7280"
+        else:
+            status_badge="<span style='background:#f3f4f6;color:#374151;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>✅ Closed</span>"
+            label="Wastage"
+            if r["pct"]<0: col="#7c3aed"
+            elif r["pct"]<=10: col="#16a34a"
+            elif r["pct"]<=25: col="#d97706"
+            else: col="#dc2626"
+        html+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
+            f"<td style='padding:8px 12px;white-space:nowrap;color:#6b7280;font-size:12px'>{r['date']} → {r['period_end']}</td>"
+            f"<td style='padding:8px 10px'>{status_badge}</td>"
+            f"<td style='padding:8px 10px'><span style='color:{CITY_COLOR.get(r['city'],'#6b7280')};font-weight:600'>{r['city']}</span></td>"
+            f"<td style='padding:8px 10px'>{_html.escape(r['material'])}</td>"
+            f"<td style='padding:8px 10px;text-align:center'>{r['issued_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center'>{r['actual_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center;font-weight:600;color:{col}'>{label}: {r['diff_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{col}'>{r['pct']}%</td></tr>")
+    return html
+
+@app.route('/wastage')
+def wastage_page():
+    rows=compute_wastage()
+    wastage_html=build_wastage_html(rows)
+    return render_template('wastage.html',wastage_html=wastage_html,city_color=CITY_COLOR,cities=CITIES)
+
+@app.route('/api/stock_add',methods=['POST'])
+def stock_add():
+    try:
+        p=request.get_json(force=True)
+        qty=float(p.get("qty",0))
+        if qty<=0 or p.get("city") not in CITIES or p.get("txn_type") not in ["OPENING","PURCHASE","ISSUE"]:
+            return jsonify({"ok":False,"error":"invalid"}),400
+        db=get_db()
+        db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?)",
+            (p.get("date") or date.today().strftime("%Y-%m-%d"),p["city"],int(p["item_id"]),p["txn_type"],qty,
+             p.get("note","").strip(),datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")))
+        db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/stock_delete',methods=['POST'])
+def stock_delete():
+    try:
+        p=request.get_json(force=True)
+        db=get_db(); db.execute("DELETE FROM stock_txn WHERE id=?",(int(p["id"]),)); db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/stock_item_add',methods=['POST'])
+def stock_item_add():
+    try:
+        p=request.get_json(force=True)
+        nm=p.get("name","").strip(); un=p.get("unit","Kgs").strip() or "Kgs"
+        if not nm: return jsonify({"ok":False,"error":"name required"}),400
+        db=get_db(); db.execute("INSERT OR IGNORE INTO stock_items (name,unit) VALUES (?,?)",(nm,un)); db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/stock_item_set_reorder',methods=['POST'])
+def stock_item_set_reorder():
+    try:
+        p=request.get_json(force=True)
+        db=get_db()
+        db.execute("UPDATE stock_items SET reorder_level=? WHERE id=?",(float(p.get("reorder_level",0)),int(p["item_id"])))
+        db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/stock_export')
+def stock_export():
+    db=get_db()
+    items=[dict(r) for r in db.execute("SELECT * FROM stock_items").fetchall()]
+    txns=[dict(r) for r in db.execute("SELECT * FROM stock_txn").fetchall()]
+    db.close()
+    resp=jsonify({"items":items,"txns":txns,"exported_at":datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")})
+    resp.headers["Content-Disposition"]="attachment; filename=stock_backup.json"
+    return resp
+
+@app.route('/api/stock_import',methods=['POST'])
+def stock_import():
+    try:
+        p=request.get_json(force=True)
+        db=get_db()
+        db.execute("DELETE FROM stock_txn"); db.execute("DELETE FROM stock_items")
+        for it in p.get("items",[]):
+            db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active,reorder_level) VALUES (?,?,?,?,?)",
+                (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1),it.get("reorder_level",0)))
+        for t in p.get("txns",[]):
+            db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at","")))
+        db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok":True,"txns":len(p.get("txns",[]))})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
+
+@app.route('/api/sheets_update',methods=['POST'])
+def sheets_update():
+    global _sheets
+    try:
+        p=request.get_json(force=True)
+        if p:
+            _sheets={"orders":p.get("orders",[]),"designs":p.get("designs",[]),"pendency":p.get("pendency",[]),"fetched_at":time.time()}
+            save_sheets_cache()
+            return jsonify({"ok":True})
+    except Exception as e: print(f"[SHEETS] Push error: {e}")
+    return jsonify({"ok":False}),400
+
+@app.route('/api/sync',methods=['GET','POST'])
+def api_sync():
+    try: n=do_sync(); return jsonify({"ok":True,"new":n})
+    except Exception as e: return jsonify({"ok":False,"error":str(e)}),500
+
+@app.route('/api/backup_now',methods=['GET','POST'])
+def api_backup_now():
+    ok=do_backup(force=True)
+    return jsonify({"ok":ok,"last":_backup_state["last"],"error":_backup_state["error"]})
+
+@app.route('/api/health')
+def health():
+    db=get_db(); total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
+    ip=db.execute("SELECT COUNT(*) FROM prints WHERE status='In Process'").fetchone()[0]
+    ls=db.execute("SELECT synced_at FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
+    db.close()
+    return jsonify({"status":"ok","total":total,"in_process":ip,"last_sync":ls[0] if ls else None})
+
+init_db()
+load_sheets_cache()
+restore_from_github()
+startup_fixes()
+threading.Thread(target=auto_sync_loop,daemon=True).start()
+threading.Thread(target=auto_backup_loop,daemon=True).start()
+if __name__=='__main__':
+    port=int(os.environ.get('PORT',5000))
+    app.run(host='0.0.0.0',port=port,debug=False)
