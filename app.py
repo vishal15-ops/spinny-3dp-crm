@@ -617,20 +617,9 @@ STOCK_SHEET_MATERIAL_MAP = {
     "Glue Sticks 3D (units)":"Glue Stick 3D",
 }
 
-def sync_stock_sheet():
-    """Pull rows from the 'Stock Update' Google Sheet's Log tab (via Apps
-    Script web app URL in STOCK_SHEET_URL) and turn any new IN/OUT rows into
-    stock_txn entries (OPENING/PURCHASE/ISSUE). Already-synced rows (tracked
-    by source_id in stock_sheet_log) are skipped, so this is safe to call
-    repeatedly. ISSUE rows feed straight into the existing /wastage engine."""
-    if not STOCK_SHEET_URL: return 0
-    try:
-        r = requests.get(STOCK_SHEET_URL, timeout=20)
-        payload = r.json()
-        rows = payload.get("rows", []) if isinstance(payload, dict) else payload
-    except Exception as e:
-        print(f"[STOCK_SHEET] fetch error: {e}")
-        return 0
+def _process_stock_rows(rows):
+    """Shared logic: take a list of row dicts (from pull OR push) and insert
+    any new ones into stock_txn. Dedup via source_id in stock_sheet_log."""
     db = get_db()
     items = {row["name"]: row["id"] for row in db.execute("SELECT id,name FROM stock_items").fetchall()}
     seen = set(r[0] for r in db.execute("SELECT source_id FROM stock_sheet_log").fetchall())
@@ -641,21 +630,20 @@ def sync_stock_sheet():
         if not sid or sid in seen:
             continue
         seen.add(sid)
-        def mark_seen():
-            db.execute("INSERT OR IGNORE INTO stock_sheet_log (source_id,synced_at) VALUES (?,?)",(sid,now_str))
+        db.execute("INSERT OR IGNORE INTO stock_sheet_log (source_id,synced_at) VALUES (?,?)",(sid,now_str))
         city_raw = str(row.get("city","")).strip()
         city = STOCK_SHEET_CITY_MAP.get(city_raw, city_raw)
         if city not in CITIES:
-            mark_seen(); continue
+            continue
         mat_raw = str(row.get("material","")).strip()
         item_name = STOCK_SHEET_MATERIAL_MAP.get(mat_raw, mat_raw)
         item_id = items.get(item_name)
         if not item_id:
-            mark_seen(); continue
+            continue
         try: qty = float(row.get("qty") or 0)
         except: qty = 0
         if qty<=0:
-            mark_seen(); continue
+            continue
         direction = str(row.get("direction","")).strip().upper()
         entered_by = str(row.get("entered_by","")).strip()
         if direction=="IN":
@@ -663,15 +651,28 @@ def sync_stock_sheet():
         elif direction=="OUT":
             txn_type = "ISSUE"
         else:
-            mark_seen(); continue
+            continue
         d = str(row.get("date","")).strip() or date.today().strftime("%Y-%m-%d")
         db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?)",
             (d, city, item_id, txn_type, qty, f"From Sheet ({entered_by or 'manual'})", now_str))
-        mark_seen()
         added += 1
     db.commit(); db.close()
     if added: backup_async()
     return added
+
+def sync_stock_sheet():
+    """PULL mode: CRM fetches STOCK_SHEET_URL itself. Only works if the Apps
+    Script is publicly accessible - which Spinny's Workspace blocks. Kept as
+    a fallback; the reliable path is PUSH mode via /api/stock_update."""
+    if not STOCK_SHEET_URL: return 0
+    try:
+        r = requests.get(STOCK_SHEET_URL, timeout=20)
+        payload = r.json()
+        rows = payload.get("rows", []) if isinstance(payload, dict) else payload
+    except Exception as e:
+        print(f"[STOCK_SHEET] fetch error: {e}")
+        return 0
+    return _process_stock_rows(rows)
 
 @app.route('/materials')
 def materials():
@@ -786,15 +787,27 @@ def stock_page():
     for t in txns: agg[(t["city"],t["item_id"])][t["txn_type"]]+=float(t["qty"] or 0)
     def cur(city,iid):
         a=agg[(city,iid)]; return a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
+    def has_any(city,iid):
+        # True if this material ever had a transaction in this city
+        a=agg[(city,iid)]; return (a["OPENING"] or a["PURCHASE"] or a["ISSUE"]) > 0
+    def has_any_all(iid):
+        return any(has_any(c,iid) for c in CITIES)
     if cf=="All":
         head="".join(f"<th style='text-align:center;padding:10px 8px;color:{CITY_COLOR[c]};font-weight:700;border-bottom:2px solid #e5e7eb'>{c}</th>" for c in CITIES)
         rows=""
         for it in items:
+            if not has_any_all(it["id"]):
+                continue  # hide materials with no stock anywhere
             rl=float(it["reorder_level"] or 0)
             tot=sum(cur(c,it["id"]) for c in CITIES)
             cells=""
             for c in CITIES:
                 v=cur(c,it["id"])
+                present=has_any(c,it["id"])
+                if not present:
+                    # material not stocked in this city -> show a dash, no warning
+                    cells+="<td style='text-align:center;padding:9px 8px;color:#d1d5db'>—</td>"
+                    continue
                 if v<=0: col="#dc2626"; warn="⚠ "
                 elif rl>0 and v<=rl: col="#d97706"; warn="⚠ "
                 else: col="#111827"; warn=""
@@ -809,6 +822,8 @@ def stock_page():
     else:
         rows=""
         for it in items:
+            if not has_any(cf,it["id"]):
+                continue  # hide materials this city doesn't stock
             rl=float(it["reorder_level"] or 0)
             a=agg[(cf,it["id"])]; v=a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
             if v<=0: col="#dc2626"; warn="⚠ "
@@ -849,13 +864,7 @@ def stock_page():
     if not log_rows: log_rows="<tr><td colspan='7' style='padding:20px;text-align:center;color:#9ca3af'>No entries yet</td></tr>"
     item_options="".join(f"<option value='{it['id']}'>{_html.escape(it['name'])} ({it['unit']})</option>" for it in items)
     city_options="".join(f"<option value='{c}'>{c}</option>" for c in CITIES)
-    reorder_rows=""
-    for it in items:
-        reorder_rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
-            f"<td style='padding:8px 14px'>{_html.escape(it['name'])}</td>"
-            f"<td style='padding:8px 8px;color:#6b7280'>{it['unit']}</td>"
-            f"<td style='padding:8px 8px;text-align:center'><input type='number' step='0.1' id='reorder_{it['id']}' value='{it['reorder_level'] or 0}' style='width:80px;padding:4px 8px;border:1px solid #e5e7eb;border-radius:6px;text-align:center'></td>"
-            f"<td style='padding:8px 8px;text-align:center'><button onclick='saveReorder({it['id']})' style='padding:5px 14px;background:#111827;color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer'>Save</button></td></tr>")
+    reorder_rows=""  # Reorder Levels section removed from UI
     db.close()
     return render_template('stock.html',summary_html=summary_html,tabs_html=tabs,
         log_html=log_rows,item_options=item_options,city_options=city_options,
@@ -1017,6 +1026,20 @@ def sheets_update():
             return jsonify({"ok":True})
     except Exception as e: print(f"[SHEETS] Push error: {e}")
     return jsonify({"ok":False}),400
+
+@app.route('/api/stock_update',methods=['POST'])
+def stock_update():
+    """PUSH mode: the Stock Update Google Sheet posts its Log rows here
+    (same pattern as /api/sheets_update). Works inside Spinny's Workspace
+    because the Sheet does the sending - no public access needed."""
+    try:
+        p=request.get_json(force=True)
+        rows = p.get("rows", []) if isinstance(p, dict) else (p or [])
+        added = _process_stock_rows(rows)
+        return jsonify({"ok":True,"stock_new":added})
+    except Exception as e:
+        print(f"[STOCK_SHEET] push error: {e}")
+        return jsonify({"ok":False,"error":str(e)}),400
 
 @app.route('/api/debug_stock_sheet')
 def debug_stock_sheet():
