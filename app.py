@@ -4,12 +4,12 @@ from datetime import datetime, date, timezone, timedelta
 from flask import Flask, render_template, jsonify, redirect, request
 import requests
 from collections import defaultdict
- 
+
 IST = timezone(timedelta(hours=5, minutes=30))
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, 'spinny_3dp.db')
- 
+
 ACCOUNTS = [
     {"label":"Pune_Blr_History","token":"AQAI_IPb10d_E9OJD-cxbBW7_CY_qw8T8Qv8yZ8AEuKBIt2YzYoYj2pgMz-APjAVScBFeNOAVV5425tx6GIte-g98L8_Fcm8hZgd7TlxxfdJzt5L1WnkA9urKvE3PfXKFH4ugqYFO34aJTaB","city_override":None},
     {"label":"Bangalore_New","token":"AQB3PWzBA4I5xpRQEx9x3X35oMnx2KNdD_Gh700Pw7tEdc0ek14YOpH8ByslcCwi-PcYCxcX1CDZc3G8W2rzBNwzXEVvywSTBOmJ-ZodyO8xy5F2OAX25SlDeZAlaojTxI7EiUD0yQsQvssw","city_override":"Bangalore"},
@@ -25,10 +25,10 @@ CITY_COLOR = {"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delh
 STATUS_MAP = {1:"Queued",2:"In Process",3:"Failed",4:"Completed",5:"Cancelled",6:"Failed"}
 API_URL  = "https://api.bambulab.com/v1/user-service/my/tasks"
 SHEETS_URL = os.environ.get("SHEETS_API_URL","")
- 
+
 _sheets = {"orders":[],"designs":[],"pendency":[],"fetched_at":0}
 SHEETS_TTL = 1800
- 
+
 def fetch_sheets(force=False):
     global _sheets
     if not SHEETS_URL: return _sheets
@@ -39,14 +39,14 @@ def fetch_sheets(force=False):
             _sheets={"orders":d["data"].get("orders",[]),"designs":d["data"].get("designs",[]),"pendency":d["data"].get("pendency",[]),"fetched_at":time.time()}
     except Exception as e: print(f"[SHEETS] {e}")
     return _sheets
- 
+
 def get_db():
     db=sqlite3.connect(DB_PATH, timeout=30)
     db.row_factory=sqlite3.Row
     db.execute("PRAGMA journal_mode=DELETE")
     db.execute("PRAGMA busy_timeout=30000")
     return db
- 
+
 def init_db():
     db=get_db()
     db.executescript("""
@@ -95,7 +95,7 @@ def init_db():
         try: db.execute("INSERT OR IGNORE INTO stock_items (name,unit) VALUES (?,?)",(nm,un))
         except: pass
     db.commit(); db.close()
- 
+
 def load_sheets_cache():
     global _sheets
     try:
@@ -106,7 +106,7 @@ def load_sheets_cache():
             _sheets={"orders":cached.get("orders",[]),"designs":cached.get("designs",[]),"pendency":cached.get("pendency",[]),"fetched_at":time.time()}
         db.close()
     except Exception as e: print(f"[CACHE] Load error: {e}")
- 
+
 def save_sheets_cache():
     try:
         db=get_db()
@@ -115,18 +115,18 @@ def save_sheets_cache():
             datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")))
         db.commit(); db.close()
     except Exception as e: print(f"[CACHE] Save error: {e}")
- 
+
 import hashlib, base64 as _b64
 GH_TOKEN=os.environ.get("GH_TOKEN","")
 GH_REPO=os.environ.get("GH_BACKUP_REPO","")
 GH_PATH="crm_backup.json"
 _backup_state={"last":"never","hash":"","error":""}
- 
+
 def _gh_headers(raw=False):
     h={"Authorization":f"Bearer {GH_TOKEN}","X-GitHub-Api-Version":"2022-11-28"}
     h["Accept"]="application/vnd.github.raw+json" if raw else "application/vnd.github+json"
     return h
- 
+
 def collect_backup():
     db=get_db()
     data={"prints":[dict(r) for r in db.execute("SELECT * FROM prints").fetchall()],
@@ -134,7 +134,7 @@ def collect_backup():
           "stock_txn":[dict(r) for r in db.execute("SELECT * FROM stock_txn").fetchall()],
           "sheets":{"orders":_sheets["orders"],"designs":_sheets["designs"],"pendency":_sheets["pendency"]}}
     db.close(); return data
- 
+
 def do_backup(force=False):
     global _backup_state
     if not GH_TOKEN or not GH_REPO:
@@ -161,10 +161,10 @@ def do_backup(force=False):
         _backup_state["error"]=f"GitHub API {r.status_code}"; return False
     except Exception as e:
         _backup_state["error"]=str(e); return False
- 
+
 def backup_async():
     threading.Thread(target=do_backup,daemon=True).start()
- 
+
 def restore_from_github():
     if not GH_TOKEN or not GH_REPO: return
     try:
@@ -205,13 +205,13 @@ def restore_from_github():
             _sheets={"orders":sh.get("orders",[]),"designs":sh.get("designs",[]),"pendency":sh.get("pendency",[]),"fetched_at":time.time()}
             save_sheets_cache()
     except Exception as e: print(f"[RESTORE] Error: {e}")
- 
+
 def auto_backup_loop():
     time.sleep(120)
     while True:
         do_backup()
         time.sleep(1800)
- 
+
 def parse_dt(v):
     if not v: return None
     try:
@@ -221,7 +221,7 @@ def parse_dt(v):
         if iv>1e12: iv//=1000
         return datetime.fromtimestamp(iv) if iv>0 else None
     except: return None
- 
+
 def get_material(t):
     try:
         ams=t.get("amsDetailMapping") or []
@@ -233,7 +233,7 @@ def get_material(t):
         if ft: return ft
     except: pass
     return "ABS"
- 
+
 def compute_record(t, acc):
     st=parse_dt(t.get("startTime")); et=parse_dt(t.get("endTime"))
     cost=int(t.get("costTime") or 0)
@@ -253,6 +253,9 @@ def compute_record(t, acc):
         status="Completed"
     if status=="Queued" and et:
         status="Completed"
+    # Bambu sends canceled prints as Failed(3) with 0 real runtime -> mark Cancelled
+    if status in ("Failed","Cancelled") and dur==0 and d_wall==0:
+        status="Cancelled"
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -278,7 +281,7 @@ def compute_record(t, acc):
         "status": status, "model": t.get("deviceModel",""),
         "color": fil_color, "cost": cost,
     }
- 
+
 def dedup_prints(db):
     rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min,part_name
                        FROM prints
@@ -323,7 +326,7 @@ def dedup_prints(db):
         db.execute("DELETE FROM prints WHERE id=?",(d,))
     db.commit()
     return len(to_del)
- 
+
 def startup_fixes():
     if not os.path.exists(DB_PATH): return
     db=sqlite3.connect(DB_PATH)
@@ -335,11 +338,16 @@ def startup_fixes():
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
         # remove obvious phantom starts: <=2 min AND almost no material (failed restarts)
         db.execute("DELETE FROM prints WHERE duration_min>0 AND duration_min<=2 AND material_g<=1.0")
+        # remove 0-runtime cancelled/failed restarts when a real run of same part exists same day+printer
+        db.execute("""DELETE FROM prints WHERE duration_min=0 AND status IN ('Failed','Cancelled')
+            AND EXISTS (SELECT 1 FROM prints p2 WHERE p2.part_name=prints.part_name
+                AND p2.printer=prints.printer AND p2.date=prints.date
+                AND p2.duration_min>0 AND p2.id!=prints.id)""")
         db.commit()
         dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
     finally: db.close()
- 
+
 def fetch_tasks(token):
     s=requests.Session(); s.headers.update({"Authorization":f"Bearer {token}"})
     tasks,offset=[],0
@@ -355,7 +363,7 @@ def fetch_tasks(token):
         if len(tasks)>=data.get("total",0) or len(batch)<100: break
         offset+=100
     return tasks
- 
+
 def do_sync():
     all_records = []
     for acc in ACCOUNTS:
@@ -396,7 +404,7 @@ def do_sync():
     db.commit(); db.close()
     startup_fixes()
     return new_count
- 
+
 def auto_sync_loop():
     try: do_sync()
     except Exception as e: print(f"[SYNC] Startup error: {e}")
@@ -404,10 +412,10 @@ def auto_sync_loop():
         time.sleep(7200)
         try: do_sync()
         except Exception as e: print(f"[SYNC] Error: {e}")
- 
+
 HOURS_SQL = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)"
 MAT_SQL   = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0)"
- 
+
 def build_recent_html(rows, today):
     html=""
     for row in rows:
@@ -432,7 +440,7 @@ def build_recent_html(rows, today):
                f"<td class='mono' style='font-weight:600'>{dur_str}</td>"
                f"<td class='mono'>{r_matg}g</td><td>{badge}</td></tr>")
     return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No prints yet</td></tr>"
- 
+
 def build_daily_html(db, today):
     dates=db.execute("SELECT DISTINCT date FROM prints WHERE date!='' ORDER BY date DESC LIMIT 30").fetchall()
     html=""; cc={"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delhi":"#43A047"}
@@ -449,7 +457,7 @@ def build_daily_html(db, today):
         dot=" &#9679;" if d==today else ""
         html+=f"<tr {rs}><td class='mono' {ds}>{d}{dot}</td>{cells}<td class='mono' style='font-weight:700'>{total_p}</td><td class='mono' style='font-weight:700'>{round(total_h,1)}h</td><td class='mono'>{total_m}g</td></tr>"
     return html or "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:24px'>No data - click Sync Now</td></tr>"
- 
+
 @app.route('/')
 def dashboard():
     db=get_db(); today=date.today().strftime("%Y-%m-%d")
@@ -491,7 +499,7 @@ def dashboard():
         last_sync=last_sync,today=today,city_color=CITY_COLOR,cities=CITIES,
         ord_city=ord_city,total_orders=len(orders),
         today_designs=today_designs,month_designs=month_designs,total_designs=len(designs))
- 
+
 @app.route('/city/<city>')
 def city_page(city):
     if city not in CITIES: return redirect('/')
@@ -518,7 +526,7 @@ def city_page(city):
     db.close()
     return render_template('city.html',city=city,color=CITY_COLOR[city],
         ov=ov,td=td,avg=avg,rows=rows,today=today,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/monthly')
 def monthly():
     db=get_db()
@@ -535,7 +543,7 @@ def monthly():
         cd=md[mo]; months_list.append((mo,cd,sum(v["total"] for v in cd.values()),sum(v["done"] for v in cd.values()),sum(v["failed"] for v in cd.values()),round(sum(v["hours"] for v in cd.values()),1),round(sum(v["mat_kg"] for v in cd.values()),2)))
     db.close()
     return render_template('monthly.html',months_list=months_list,city_color=CITY_COLOR,cities=CITIES)
- 
+
 def fil_name(mat,col):
     m=(mat or "").upper(); c=(col or "").lower().strip()
     try:
@@ -547,7 +555,7 @@ def fil_name(mat,col):
     elif "TPU" in m: return "eSUN TPU-95A"
     elif "PA" in m: return "eSUN ePA12"
     return mat or "Unknown"
- 
+
 CATEGORY_TO_ITEM = {
     "eSun ABS+ Black":"eSUN ABS+ Filament 1.75mm Black",
     "eSun ABS+ White":"eSUN ABS+ Filament 1.75mm White",
@@ -558,12 +566,12 @@ CATEGORY_TO_ITEM = {
 }
 ITEM_TO_CATEGORY = {v:k for k,v in CATEGORY_TO_ITEM.items()}
 ITEM_TO_CATEGORY["eSUN ePA12 Filament 1.75mm White"] = "eSUN ePA12"
- 
+
 @app.route('/materials')
 def materials():
     db=get_db()
     FILS=["eSun ABS+ Black","eSun ABS+ White","eSUN PLA+ Black","eSUN PLA+ White","eSUN TPU-95A","eSUN ePA12"]
- 
+
     raw=db.execute("""SELECT material,filament_color,COUNT(*),
         COALESCE(SUM(material_g),0)/1000.0,
         COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
@@ -577,13 +585,13 @@ def materials():
         fil_total[fn]["parts"]+=r[2]; fil_total[fn]["kg"]+=round(float(r[3]),3); fil_total[fn]["failed"]+=r[4]
     top=[(k,v) for k,v in fil_total.items() if v["kg"]>0]
     top.sort(key=lambda x:x[1]["kg"],reverse=True)
- 
+
     mraw=db.execute("""SELECT substr(date,1,7) as mo,city,material,filament_color,
         COUNT(*),COALESCE(SUM(material_g),0)/1000.0,
         COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0)
         FROM prints WHERE date!='' AND status IN ('Completed','Failed')
         GROUP BY mo,city,material,filament_color ORDER BY 1 DESC,2,3""").fetchall()
- 
+
     months_set=set(); _mdata={}
     for r in mraw:
         mo,city,mat,col=r[0],r[1],r[2],r[3]
@@ -596,14 +604,14 @@ def materials():
         _mdata[mo][city][fn]["parts"]+=r[4]
         _mdata[mo][city][fn]["kg"]+=round(float(r[5]),3)
         _mdata[mo][city][fn]["failed"]+=r[6]
- 
+
     months_list=sorted(months_set,reverse=True)[:6]
     sel_mo=request.args.get("mo",months_list[0] if months_list else "")
- 
+
     db.close()
     return render_template('materials.html',top=top,mdata=_mdata,months_list=months_list,
         sel_mo=sel_mo,filaments=FILS,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/fails')
 def fails():
     db=get_db()
@@ -611,7 +619,7 @@ def fails():
     top=db.execute("SELECT part_name,COUNT(*),city FROM prints WHERE status IN ('Failed','Cancelled') GROUP BY part_name ORDER BY 2 DESC LIMIT 20").fetchall()
     db.close()
     return render_template('fails.html',rows=rows,top=top,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/orders')
 def orders():
     data=fetch_sheets(force=False); all_orders=data.get("orders",[])
@@ -634,7 +642,7 @@ def orders():
     return render_template('orders.html',orders=filtered,city_stats=city_stats,city_filter=cf,
         status_filter=sf,statuses=statuses,city_color=CITY_COLOR,cities=CITIES,
         total=len(all_orders),daily_summary=daily_summary,today_date=today_date)
- 
+
 @app.route('/designs')
 def designs():
     data=fetch_sheets(force=False); all_designs=data.get("designs",[])
@@ -658,11 +666,11 @@ def designs():
         city_color=CITY_COLOR,cities=CITIES,today_count=len(today_list),
         filter_today=filter_today,filter_date=filter_date,today_str=today_str,
         daily_summary=daily_summary)
- 
+
 def _fmt_qty(v):
     v=float(v or 0)
     return str(int(v)) if v==int(v) else f"{v:g}"
- 
+
 @app.route('/stock')
 def stock_page():
     db=get_db(); cf=request.args.get("city","All")
@@ -748,7 +756,7 @@ def stock_page():
         reorder_html=reorder_rows,
         city_filter=cf,today=date.today().strftime("%Y-%m-%d"),txn_count=len(txns),
         backup_last=_backup_state["last"],backup_on=bool(GH_TOKEN and GH_REPO))
- 
+
 def compute_wastage():
     db=get_db()
     today=date.today().strftime("%Y-%m-%d")
@@ -784,7 +792,7 @@ def compute_wastage():
     db.close()
     out.sort(key=lambda x:x["date"],reverse=True)
     return out
- 
+
 def build_wastage_html(rows):
     if not rows:
         return "<tr><td colspan='8' style='padding:24px;text-align:center;color:#9ca3af'>No Issue entries found yet — add an Issue entry on the Daily Materials page first, then wastage will be calculated</td></tr>"
@@ -811,13 +819,13 @@ def build_wastage_html(rows):
             f"<td style='padding:8px 10px;text-align:center;font-weight:600;color:{col}'>{label}: {r['diff_g']}g</td>"
             f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{col}'>{r['pct']}%</td></tr>")
     return html
- 
+
 @app.route('/wastage')
 def wastage_page():
     rows=compute_wastage()
     wastage_html=build_wastage_html(rows)
     return render_template('wastage.html',wastage_html=wastage_html,city_color=CITY_COLOR,cities=CITIES)
- 
+
 @app.route('/api/stock_add',methods=['POST'])
 def stock_add():
     try:
@@ -833,7 +841,7 @@ def stock_add():
         backup_async()
         return jsonify({"ok":True})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
- 
+
 @app.route('/api/stock_delete',methods=['POST'])
 def stock_delete():
     try:
@@ -842,7 +850,7 @@ def stock_delete():
         backup_async()
         return jsonify({"ok":True})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
- 
+
 @app.route('/api/stock_item_add',methods=['POST'])
 def stock_item_add():
     try:
@@ -853,7 +861,7 @@ def stock_item_add():
         backup_async()
         return jsonify({"ok":True})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
- 
+
 @app.route('/api/stock_item_set_reorder',methods=['POST'])
 def stock_item_set_reorder():
     try:
@@ -864,7 +872,7 @@ def stock_item_set_reorder():
         backup_async()
         return jsonify({"ok":True})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
- 
+
 @app.route('/api/stock_export')
 def stock_export():
     db=get_db()
@@ -874,7 +882,7 @@ def stock_export():
     resp=jsonify({"items":items,"txns":txns,"exported_at":datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")})
     resp.headers["Content-Disposition"]="attachment; filename=stock_backup.json"
     return resp
- 
+
 @app.route('/api/stock_import',methods=['POST'])
 def stock_import():
     try:
@@ -891,7 +899,7 @@ def stock_import():
         backup_async()
         return jsonify({"ok":True,"txns":len(p.get("txns",[]))})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),400
- 
+
 @app.route('/api/sheets_update',methods=['POST'])
 def sheets_update():
     global _sheets
@@ -903,17 +911,17 @@ def sheets_update():
             return jsonify({"ok":True})
     except Exception as e: print(f"[SHEETS] Push error: {e}")
     return jsonify({"ok":False}),400
- 
+
 @app.route('/api/sync',methods=['GET','POST'])
 def api_sync():
     try: n=do_sync(); return jsonify({"ok":True,"new":n})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),500
- 
+
 @app.route('/api/backup_now',methods=['GET','POST'])
 def api_backup_now():
     ok=do_backup(force=True)
     return jsonify({"ok":ok,"last":_backup_state["last"],"error":_backup_state["error"]})
- 
+
 @app.route('/api/debug_bambu')
 def debug_bambu():
     """Live raw Bambu data to diagnose duplicate/phantom prints.
@@ -953,7 +961,7 @@ def debug_bambu():
         "repeated_titles":dup_titles,
         "rows":rows[:120]
     })
- 
+
 @app.route('/api/health')
 def health():
     db=get_db(); total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
@@ -961,7 +969,7 @@ def health():
     ls=db.execute("SELECT synced_at FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     db.close()
     return jsonify({"status":"ok","total":total,"in_process":ip,"last_sync":ls[0] if ls else None})
- 
+
 init_db()
 load_sheets_cache()
 restore_from_github()
