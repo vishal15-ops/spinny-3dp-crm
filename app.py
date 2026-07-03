@@ -1138,6 +1138,17 @@ def health():
     db.close()
     return jsonify({"status":"ok","total":total,"in_process":ip,"last_sync":ls[0] if ls else None})
 
+@app.route('/api/debug_wastage_rows')
+def debug_wastage_rows():
+    db = get_db()
+    rows = db.execute("SELECT id,date,city,item_id,txn_type,qty,note,created_at,txn_time FROM stock_txn WHERE city='Hyderabad' AND txn_type='ISSUE' ORDER BY id DESC").fetchall()
+    items = db.execute("SELECT id,name FROM stock_items").fetchall()
+    db.close()
+    return jsonify({
+        "issue_rows": [dict(r) for r in rows],
+        "items": {r["id"]: r["name"] for r in items}
+    })
+
 init_db()
 load_sheets_cache()
 restore_from_github()
