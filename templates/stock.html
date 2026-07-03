@@ -90,16 +90,6 @@
 
 <div class="table-card">
   <div class="table-card-header">
-    <span>⚙ Reorder Levels — an orange warning shows when stock falls below this level</span>
-  </div>
-  <table>
-    <thead><tr><th>Material</th><th>Unit</th><th style="text-align:center">Min Level</th><th></th></tr></thead>
-    <tbody>{{ reorder_html|safe }}</tbody>
-  </table>
-</div>
-
-<div class="table-card">
-  <div class="table-card-header">
     <span>Recent Entries</span>
     <div style="display:flex;gap:10px">
       <a href="/wastage" style="font-size:12px;color:#7c3aed;text-decoration:none;font-weight:600">📊 Wastage Report</a>
@@ -142,11 +132,6 @@ function addItem(){
   const unit=document.getElementById('new_item_unit').value;
   if(!name){ alert('Please enter a material name'); return; }
   fetch('/api/stock_item_add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,unit:unit})})
-    .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Error: '+d.error); });
-}
-function saveReorder(itemId){
-  const val=document.getElementById('reorder_'+itemId).value;
-  fetch('/api/stock_item_set_reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:itemId,reorder_level:val})})
     .then(r=>r.json()).then(d=>{ if(d.ok) location.reload(); else alert('Error: '+d.error); });
 }
 function manualBackup(e){
