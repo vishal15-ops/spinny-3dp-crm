@@ -12,9 +12,26 @@
 
 <div class="cards-row cards-4">
   <div class="card"><div class="card-label">Total Prints</div><div class="card-value">{{ total }}</div><div class="card-sub">All time, all cities</div></div>
-  <div class="card"><div class="card-label">Success Rate</div><div class="card-value text-green">{{ "%.0f"|format(completed/total*100 if total else 0) }}%</div><div class="card-sub">{{ completed }} completed / {{ failed }} failed</div></div>
-  <div class="card"><div class="card-label">Machine Hours</div><div class="card-value">{{ hrs_total }}h</div><div class="card-sub">Total all time</div></div>
+  <div class="card"><div class="card-label">Success Rate</div><div class="card-value text-green">{{ "%.0f"|format(completed/total*100 if total else 0) }}%</div><div class="card-sub">{{ completed }} completed / {{ cancelled }} cancelled</div></div>
+  <div class="card"><div class="card-label">Machine Hours</div><div class="card-value">{{ hrs_total }}h</div><div class="card-sub">Successful prints — total all time</div></div>
   <div class="card"><div class="card-label">Total Orders</div><div class="card-value" style="color:#e91e63">{{ total_orders }}</div><div class="card-sub">From Order Sheet</div></div>
+</div>
+
+<div class="cards-row cards-2" style="margin-bottom:22px">
+  <div class="card" style="border-left:4px solid #16a34a">
+    <div class="card-label" style="color:#16a34a">✓ Success — Machine Time &amp; Material</div>
+    <div style="display:flex;gap:28px;margin-top:8px">
+      <div><div class="card-value" style="font-size:22px">{{ hrs_total }}h</div><div class="card-sub">machine time (all time)</div></div>
+      <div><div class="card-value" style="font-size:22px">{{ mat_total }}kg</div><div class="card-sub">material used (all time)</div></div>
+    </div>
+  </div>
+  <div class="card" style="border-left:4px solid #dc2626">
+    <div class="card-label" style="color:#dc2626">✗ Cancelled — Machine Time &amp; Material Wasted</div>
+    <div style="display:flex;gap:28px;margin-top:8px">
+      <div><div class="card-value" style="font-size:22px;color:#dc2626">{{ cancel_hrs_total }}h</div><div class="card-sub">machine time (all time)</div></div>
+      <div><div class="card-value" style="font-size:22px;color:#dc2626">{{ cancel_mat_total }}kg</div><div class="card-sub">material wasted (all time)</div></div>
+    </div>
+  </div>
 </div>
 
 <div class="section-title">Today — {{ today }}</div>
@@ -25,9 +42,13 @@
     <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Total Parts</div><div style="font-size:26px;font-weight:800;margin-top:4px">{{ today_total.prints }}</div></div>
     <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Completed</div><div style="font-size:26px;font-weight:800;margin-top:4px;color:#16a34a">{{ today_total.ok }}</div></div>
     <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">In Process</div><div style="font-size:26px;font-weight:800;margin-top:4px;color:#f59e0b">{{ today_total.live if today_total.live is defined else 0 }}</div></div>
-    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Failed</div><div style="font-size:26px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.failed }}</div></div>
+    <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Cancelled</div><div style="font-size:26px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.cancelled }}</div></div>
     <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Machine Hours</div><div style="font-size:26px;font-weight:800;margin-top:4px">{{ today_total.hours }}h</div></div>
     <div><div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Material Used</div><div style="font-size:26px;font-weight:800;margin-top:4px">{{ today_total.mat_g }}g</div></div>
+  </div>
+  <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6;display:grid;grid-template-columns:repeat(2,1fr);gap:16px">
+    <div><div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancelled — Machine Time</div><div style="font-size:20px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.cancel_hours }}h</div></div>
+    <div><div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancelled — Material Wasted</div><div style="font-size:20px;font-weight:800;margin-top:4px;color:#dc2626">{{ today_total.cancel_mat_g }}g</div></div>
   </div>
 </div>
 
@@ -41,6 +62,11 @@
       <div><div style="font-size:10px;color:#9ca3af">Done</div><div style="font-size:20px;font-weight:800;color:#16a34a">{{ cities_today[city].ok }}</div></div>
       <div><div style="font-size:10px;color:#9ca3af">Hours</div><div style="font-size:16px;font-weight:700">{{ cities_today[city].hours }}h</div></div>
       <div><div style="font-size:10px;color:#9ca3af">Material</div><div style="font-size:16px;font-weight:700">{{ cities_today[city].mat_g }}g</div></div>
+    </div>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #f3f4f6;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div><div style="font-size:10px;color:#dc2626">Cancelled</div><div style="font-size:16px;font-weight:800;color:#dc2626">{{ cities_today[city].cancelled }}</div></div>
+      <div><div style="font-size:10px;color:#dc2626">Cancel Time</div><div style="font-size:14px;font-weight:700;color:#dc2626">{{ cities_today[city].cancel_hours }}h</div></div>
+      <div style="grid-column:span 2"><div style="font-size:10px;color:#dc2626">Cancel Material</div><div style="font-size:14px;font-weight:700;color:#dc2626">{{ cities_today[city].cancel_mat_g }}g</div></div>
     </div>
   </div>
   </a>
