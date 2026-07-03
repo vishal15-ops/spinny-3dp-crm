@@ -22,7 +22,7 @@ PRINTER_CITY = {
 }
 CITIES = ["Pune","Bangalore","Hyderabad","Delhi"]
 CITY_COLOR = {"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delhi":"#43A047","Unknown":"#90A4AE"}
-STATUS_MAP = {1:"Queued",2:"In Process",3:"Failed",4:"Completed",5:"Cancelled",6:"Failed"}
+STATUS_MAP = {1:"Queued",2:"In Process",3:"Cancelled",4:"Completed",5:"Cancelled",6:"Cancelled"}
 API_URL  = "https://api.bambulab.com/v1/user-service/my/tasks"
 SHEETS_URL = os.environ.get("SHEETS_API_URL","")
 
@@ -253,9 +253,10 @@ def compute_record(t, acc):
         status="Completed"
     if status=="Queued" and et:
         status="Completed"
-    # Bambu sends canceled prints as Failed(3) with 0 real runtime -> mark Cancelled
-    if status in ("Failed","Cancelled") and dur==0 and d_wall==0:
-        status="Cancelled"
+    # Bambu only reports Printing / Success / Cancelled.
+    # Cancelled prints carry the ESTIMATE as duration - zero it out.
+    if status=="Cancelled":
+        dur=0
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -336,13 +337,9 @@ def startup_fixes():
         db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'")
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
-        # remove obvious phantom starts: <=2 min AND almost no material (failed restarts)
-        db.execute("DELETE FROM prints WHERE duration_min>0 AND duration_min<=2 AND material_g<=1.0")
-        # remove 0-runtime cancelled/failed restarts when a real run of same part exists same day+printer
-        db.execute("""DELETE FROM prints WHERE duration_min=0 AND status IN ('Failed','Cancelled')
-            AND EXISTS (SELECT 1 FROM prints p2 WHERE p2.part_name=prints.part_name
-                AND p2.printer=prints.printer AND p2.date=prints.date
-                AND p2.duration_min>0 AND p2.id!=prints.id)""")
+        # Bambu only has Printing/Success/Cancelled - convert any old 'Failed' to 'Cancelled'
+        db.execute("UPDATE prints SET status='Cancelled' WHERE status='Failed'")
+        db.execute("UPDATE prints SET duration_min=0 WHERE status='Cancelled'")
         db.commit()
         dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
