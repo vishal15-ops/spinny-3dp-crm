@@ -20,17 +20,35 @@
     <div class="card-value {% if ov[0]>0 and (ov[1]/ov[0]*100)|int>=75 %}text-green{% else %}text-red{% endif %}">
       {{ "%.0f"|format(ov[1]/ov[0]*100 if ov[0] else 0) }}%
     </div>
-    <div class="card-sub">{{ ov[1] }} done / {{ ov[2] }} failed</div>
+    <div class="card-sub">{{ ov[1] }} done / {{ ov[5] }} cancelled</div>
   </div>
   <div class="card">
     <div class="card-label">Machine Hours</div>
     <div class="card-value">{{ "%.1f"|format(ov[3]) }}h</div>
-    <div class="card-sub">Total run time</div>
+    <div class="card-sub">Successful prints — total run time</div>
   </div>
   <div class="card">
     <div class="card-label">Material Used</div>
     <div class="card-value">{{ "%.2f"|format(ov[4]) }}kg</div>
-    <div class="card-sub">Total filament</div>
+    <div class="card-sub">Successful prints — total filament</div>
+  </div>
+</div>
+
+<div class="section-title">✓ Success vs ✗ Cancelled — Machine Time &amp; Material (All Time)</div>
+<div class="cards-row cards-2" style="margin-bottom:20px">
+  <div class="card" style="border-left:4px solid #16a34a">
+    <div class="card-label" style="color:#16a34a">✓ Success</div>
+    <div style="display:flex;gap:28px;margin-top:8px">
+      <div><div class="card-value" style="font-size:22px">{{ "%.1f"|format(ov[3]) }}h</div><div class="card-sub">machine time</div></div>
+      <div><div class="card-value" style="font-size:22px">{{ "%.2f"|format(ov[4]) }}kg</div><div class="card-sub">material used</div></div>
+    </div>
+  </div>
+  <div class="card" style="border-left:4px solid #dc2626">
+    <div class="card-label" style="color:#dc2626">✗ Cancelled</div>
+    <div style="display:flex;gap:28px;margin-top:8px">
+      <div><div class="card-value" style="font-size:22px;color:#dc2626">{{ "%.1f"|format(ov[6]) }}h</div><div class="card-sub">machine time wasted</div></div>
+      <div><div class="card-value" style="font-size:22px;color:#dc2626">{{ "%.2f"|format(ov[7]) }}kg</div><div class="card-sub">material wasted</div></div>
+    </div>
   </div>
 </div>
 
@@ -42,12 +60,26 @@
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ td[0] }}</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Hours Today</div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Hours Today (Success)</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ "%.1f"|format(td[1]) }}h</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Material Today</div>
+      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Material Today (Success)</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ "%.0f"|format(td[2]) }}g</div>
+    </div>
+  </div>
+  <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6;display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+    <div>
+      <div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancelled Today</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#dc2626">{{ td[3] }}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancel Time Today</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#dc2626">{{ "%.1f"|format(td[4]) }}h</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancel Material Today</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#dc2626">{{ "%.0f"|format(td[5]) }}g</div>
     </div>
   </div>
 </div>
@@ -71,7 +103,7 @@
       <div style="font-size:12px;color:#6b7280;margin-top:4px">recent {{ avg.days_30 }} active days</div>
     </div>
   </div>
-  <div style="margin-top:12px;font-size:11px;color:#9ca3af">💡 Average = total run hours ÷ days the machine actually ran (idle days not counted).</div>
+  <div style="margin-top:12px;font-size:11px;color:#9ca3af">💡 Average = total run hours ÷ days the machine actually ran (idle days not counted). Cancelled prints are excluded from this average.</div>
 </div>
 
 <div style="margin-bottom:16px">
