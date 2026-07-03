@@ -244,9 +244,6 @@ def compute_record(t, acc):
     d_cost = cost//60 if (60<=cost<=86400) else 0
     status=STATUS_MAP.get(int(t.get("status") or 0),str(t.get("status","")))
     if status=="Cancelled":
-        # Cancelled prints: Bambu's costTime is the FULL-PRINT ESTIMATE, not
-        # real elapsed time. Use ONLY the real wall-clock time (start->cancel)
-        # so "machine time wasted on cancelled prints" is accurate.
         dur = d_wall if 0 < d_wall <= 1440 else 0
     elif 0 < d_wall <= 1440:
         if d_cost and d_wall > d_cost*1.5 and (d_wall - d_cost) > 120:
@@ -310,18 +307,10 @@ def dedup_prints(db):
         for j in jobs:
             clash=None
             for k in kept:
-                # Only merge records whose time windows GENUINELY OVERLAP -
-                # that's the only reliable signal of the same physical print
-                # session being reported twice by Bambu (a true phantom).
-                # We do NOT merge just because the same part name printed
-                # again a short time later (e.g. cancel -> reprint, or two
-                # separate back-to-back jobs) - those are real, distinct
-                # prints and must both be kept even if minutes apart.
                 overlap = j["st"]<k["et"] and k["st"]<j["et"]
                 if overlap:
                     clash=k; break
             if clash:
-                # keep the LONGER real print; if equal length, keep higher status rank
                 if j["dur"]>clash["dur"] or (j["dur"]==clash["dur"] and rank.get(j["status"],0)>rank.get(clash["status"],0)):
                     to_del.add(clash["id"]); kept.remove(clash); kept.append(j)
                 else:
@@ -342,10 +331,7 @@ def startup_fixes():
         db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'")
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
-        # Bambu only has Printing/Success/Cancelled - convert any old 'Failed' to 'Cancelled'
         db.execute("UPDATE prints SET status='Cancelled' WHERE status='Failed'")
-        # NOTE: we no longer zero Cancelled duration here - do_sync() now stores
-        # the REAL wall-clock time for cancelled prints (see compute_record()).
         db.commit()
         dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
@@ -532,13 +518,11 @@ def city_page(city):
         COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
         {CANCEL_HOURS_SQL}/60.0,{CANCEL_MAT_SQL}
         FROM prints WHERE city=? AND date=?""",(city,today)).fetchone()
-    # ---- averages: total run hours / active days & active months ----
     active_days=db.execute("SELECT COUNT(DISTINCT date) FROM prints WHERE city=? AND date!='' AND status IN ('Completed','In Process','Failed') AND duration_min>0",(city,)).fetchone()[0] or 0
     active_months=db.execute("SELECT COUNT(DISTINCT substr(date,1,7)) FROM prints WHERE city=? AND date!='' AND status IN ('Completed','In Process','Failed') AND duration_min>0",(city,)).fetchone()[0] or 0
     total_hours=float(ov[3] or 0)
     avg_daily=round(total_hours/active_days,1) if active_days else 0
     avg_monthly=round(total_hours/active_months,1) if active_months else 0
-    # last-30-days average (rolling)
     d30=(date.today()-timedelta(days=30)).strftime("%Y-%m-%d")
     r30=db.execute(f"SELECT COUNT(DISTINCT date),{HOURS_SQL}/60.0 FROM prints WHERE city=? AND date>=? AND status IN ('Completed','In Process','Failed') AND duration_min>0",(city,d30)).fetchone()
     days30=r30[0] or 0; hrs30=float(r30[1] or 0)
@@ -601,7 +585,6 @@ CATEGORY_TO_ITEM = {
 ITEM_TO_CATEGORY = {v:k for k,v in CATEGORY_TO_ITEM.items()}
 ITEM_TO_CATEGORY["eSUN ePA12 Filament 1.75mm White"] = "eSUN ePA12"
 
-# ---- Google Sheet "Stock Update" -> stock_txn auto-sync ----
 STOCK_SHEET_CITY_MAP = {"Bengaluru":"Bangalore","Bangalore":"Bangalore","Pune":"Pune","Delhi":"Delhi","Hyderabad":"Hyderabad"}
 STOCK_SHEET_MATERIAL_MAP = {
     "ABS Black (KG)":"eSUN ABS+ Filament 1.75mm Black",
@@ -618,8 +601,6 @@ STOCK_SHEET_MATERIAL_MAP = {
 }
 
 def _process_stock_rows(rows):
-    """Shared logic: take a list of row dicts (from pull OR push) and insert
-    any new ones into stock_txn. Dedup via source_id in stock_sheet_log."""
     db = get_db()
     items = {row["name"]: row["id"] for row in db.execute("SELECT id,name FROM stock_items").fetchall()}
     seen = set(r[0] for r in db.execute("SELECT source_id FROM stock_sheet_log").fetchall())
@@ -629,8 +610,6 @@ def _process_stock_rows(rows):
         sid = str(row.get("source_id","")).strip()
         if not sid or sid in seen:
             continue
-        seen.add(sid)
-        db.execute("INSERT OR IGNORE INTO stock_sheet_log (source_id,synced_at) VALUES (?,?)",(sid,now_str))
         city_raw = str(row.get("city","")).strip()
         city = STOCK_SHEET_CITY_MAP.get(city_raw, city_raw)
         if city not in CITIES:
@@ -655,15 +634,14 @@ def _process_stock_rows(rows):
         d = str(row.get("date","")).strip() or date.today().strftime("%Y-%m-%d")
         db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?)",
             (d, city, item_id, txn_type, qty, f"From Sheet ({entered_by or 'manual'})", now_str))
+        db.execute("INSERT OR IGNORE INTO stock_sheet_log (source_id,synced_at) VALUES (?,?)",(sid,now_str))
+        seen.add(sid)
         added += 1
     db.commit(); db.close()
     if added: backup_async()
     return added
 
 def sync_stock_sheet():
-    """PULL mode: CRM fetches STOCK_SHEET_URL itself. Only works if the Apps
-    Script is publicly accessible - which Spinny's Workspace blocks. Kept as
-    a fallback; the reliable path is PUSH mode via /api/stock_update."""
     if not STOCK_SHEET_URL: return 0
     try:
         r = requests.get(STOCK_SHEET_URL, timeout=20)
@@ -788,7 +766,6 @@ def stock_page():
     def cur(city,iid):
         a=agg[(city,iid)]; return a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
     def has_any(city,iid):
-        # True if this material ever had a transaction in this city
         a=agg[(city,iid)]; return (a["OPENING"] or a["PURCHASE"] or a["ISSUE"]) > 0
     def has_any_all(iid):
         return any(has_any(c,iid) for c in CITIES)
@@ -797,7 +774,7 @@ def stock_page():
         rows=""
         for it in items:
             if not has_any_all(it["id"]):
-                continue  # hide materials with no stock anywhere
+                continue
             rl=float(it["reorder_level"] or 0)
             tot=sum(cur(c,it["id"]) for c in CITIES)
             cells=""
@@ -805,7 +782,6 @@ def stock_page():
                 v=cur(c,it["id"])
                 present=has_any(c,it["id"])
                 if not present:
-                    # material not stocked in this city -> show a dash, no warning
                     cells+="<td style='text-align:center;padding:9px 8px;color:#d1d5db'>—</td>"
                     continue
                 if v<=0: col="#dc2626"; warn="⚠ "
@@ -823,7 +799,7 @@ def stock_page():
         rows=""
         for it in items:
             if not has_any(cf,it["id"]):
-                continue  # hide materials this city doesn't stock
+                continue
             rl=float(it["reorder_level"] or 0)
             a=agg[(cf,it["id"])]; v=a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
             if v<=0: col="#dc2626"; warn="⚠ "
@@ -864,7 +840,7 @@ def stock_page():
     if not log_rows: log_rows="<tr><td colspan='7' style='padding:20px;text-align:center;color:#9ca3af'>No entries yet</td></tr>"
     item_options="".join(f"<option value='{it['id']}'>{_html.escape(it['name'])} ({it['unit']})</option>" for it in items)
     city_options="".join(f"<option value='{c}'>{c}</option>" for c in CITIES)
-    reorder_rows=""  # Reorder Levels section removed from UI
+    reorder_rows=""
     db.close()
     return render_template('stock.html',summary_html=summary_html,tabs_html=tabs,
         log_html=log_rows,item_options=item_options,city_options=city_options,
@@ -1029,9 +1005,6 @@ def sheets_update():
 
 @app.route('/api/stock_update',methods=['POST'])
 def stock_update():
-    """PUSH mode: the Stock Update Google Sheet posts its Log rows here
-    (same pattern as /api/sheets_update). Works inside Spinny's Workspace
-    because the Sheet does the sending - no public access needed."""
     try:
         p=request.get_json(force=True)
         rows = p.get("rows", []) if isinstance(p, dict) else (p or [])
@@ -1041,9 +1014,20 @@ def stock_update():
         print(f"[STOCK_SHEET] push error: {e}")
         return jsonify({"ok":False,"error":str(e)}),400
 
+@app.route('/api/stock_sheet_reset', methods=['POST'])
+def stock_sheet_reset():
+    try:
+        db = get_db()
+        deleted = db.execute("DELETE FROM stock_txn WHERE note LIKE 'From Sheet%'").rowcount
+        db.execute("DELETE FROM stock_sheet_log")
+        db.commit(); db.close()
+        backup_async()
+        return jsonify({"ok": True, "deleted": deleted})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
 @app.route('/api/debug_stock_sheet')
 def debug_stock_sheet():
-    """Diagnose STOCK_SHEET_URL fetch issues without touching the database."""
     if not STOCK_SHEET_URL:
         return jsonify({"ok":False,"error":"STOCK_SHEET_URL env var is not set on this server"})
     try:
@@ -1086,8 +1070,6 @@ def api_backup_now():
 
 @app.route('/api/debug_bambu')
 def debug_bambu():
-    """Live raw Bambu data to diagnose duplicate/phantom prints.
-    Usage: /api/debug_bambu?city=Delhi  (optionally &date=2026-07-03)"""
     city=request.args.get("city","Delhi")
     date_filter=request.args.get("date","")
     acc=next((a for a in ACCOUNTS if (a["city_override"]==city)),None)
