@@ -8,7 +8,6 @@
     <div class="page-meta">Parts · Hours · Material · Failures — All Cities</div>
   </div>
 </div>
-
 {% for row in months_list %}
 {% set mo = row[0] %}
 {% set cd = row[1] %}
@@ -17,7 +16,6 @@
 {% set total_fail = row[4] %}
 {% set total_h = row[5] %}
 {% set total_mat = row[6] %}
-
 <div style="margin-bottom:28px">
   <!-- Month Header -->
   <div style="background:#1e293b;color:#fff;padding:12px 20px;border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center">
@@ -30,11 +28,10 @@
       🧵 {{ total_mat }}kg
     </span>
   </div>
-
   <!-- City Cards -->
   <div style="display:grid;grid-template-columns:repeat(4,1fr);border:1.5px solid #e2e8f0;border-top:none;border-radius:0 0 10px 10px;overflow:hidden">
     {% for city in ['Pune','Bangalore','Hyderabad','Delhi'] %}
-    {% set c = cd[city] %}
+    {% set c = cd[city] if city in cd else {'total':0,'done':0,'cancelled':0,'hours':0,'mat_kg':0,'cancel_hours':0,'cancel_mat_kg':0} %}
     <div style="padding:16px;border-right:1px solid #e2e8f0{% if loop.last %};border-right:none{% endif %}">
       <!-- City Name -->
       <div style="font-size:13px;font-weight:700;color:{{ city_color[city] }};margin-bottom:12px">
@@ -51,8 +48,8 @@
           <div style="font-size:22px;font-weight:800;color:#16a34a">{{ "%.0f"|format(c.done/c.total*100 if c.total else 0) }}%</div>
         </div>
         <div style="background:#fff7ed;border-radius:8px;padding:10px;text-align:center">
-          <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Failed</div>
-          <div style="font-size:22px;font-weight:800;color:{% if c.failed > 0 %}#dc2626{% else %}#94a3b8{% endif %}">{{ c.failed }}</div>
+          <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Cancelled</div>
+          <div style="font-size:22px;font-weight:800;color:{% if c.cancelled > 0 %}#dc2626{% else %}#94a3b8{% endif %}">{{ c.cancelled }}</div>
         </div>
         <div style="background:#eff6ff;border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;margin-bottom:4px">Hours</div>
