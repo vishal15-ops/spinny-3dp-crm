@@ -1018,9 +1018,42 @@ def sheets_update():
     except Exception as e: print(f"[SHEETS] Push error: {e}")
     return jsonify({"ok":False}),400
 
+@app.route('/api/debug_stock_sheet')
+def debug_stock_sheet():
+    """Diagnose STOCK_SHEET_URL fetch issues without touching the database."""
+    if not STOCK_SHEET_URL:
+        return jsonify({"ok":False,"error":"STOCK_SHEET_URL env var is not set on this server"})
+    try:
+        r = requests.get(STOCK_SHEET_URL, timeout=20, allow_redirects=True)
+    except Exception as e:
+        return jsonify({"ok":False,"stage":"http_request","error":str(e)})
+    result = {
+        "ok": True,
+        "url_used": STOCK_SHEET_URL,
+        "final_url": r.url,
+        "status_code": r.status_code,
+        "content_type": r.headers.get("Content-Type",""),
+        "raw_preview": r.text[:800],
+    }
+    try:
+        payload = r.json()
+        rows = payload.get("rows", []) if isinstance(payload, dict) else payload
+        result["json_parsed"] = True
+        result["row_count"] = len(rows) if isinstance(rows, list) else "not a list"
+        result["sample_rows"] = rows[:3] if isinstance(rows, list) else None
+    except Exception as e:
+        result["json_parsed"] = False
+        result["json_error"] = str(e)
+    return jsonify(result)
+
 @app.route('/api/sync',methods=['GET','POST'])
 def api_sync():
-    try: n=do_sync(); return jsonify({"ok":True,"new":n})
+    try:
+        n=do_sync()
+        s=0
+        try: s=sync_stock_sheet()
+        except Exception as e: print(f"[STOCK_SHEET] {e}")
+        return jsonify({"ok":True,"new":n,"stock_sheet_new":s})
     except Exception as e: return jsonify({"ok":False,"error":str(e)}),500
 
 @app.route('/api/backup_now',methods=['GET','POST'])
