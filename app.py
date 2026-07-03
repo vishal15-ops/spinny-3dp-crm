@@ -25,6 +25,7 @@ CITY_COLOR = {"Pune":"#2196F3","Bangalore":"#9C27B0","Hyderabad":"#FF9800","Delh
 STATUS_MAP = {1:"Queued",2:"In Process",3:"Cancelled",4:"Completed",5:"Cancelled",6:"Cancelled"}
 API_URL  = "https://api.bambulab.com/v1/user-service/my/tasks"
 SHEETS_URL = os.environ.get("SHEETS_API_URL","")
+STOCK_SHEET_URL = os.environ.get("STOCK_SHEET_URL","")
 
 _sheets = {"orders":[],"designs":[],"pendency":[],"fetched_at":0}
 SHEETS_TTL = 1800
@@ -70,6 +71,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT, city TEXT, item_id INTEGER,
             txn_type TEXT, qty REAL, note TEXT DEFAULT '', created_at TEXT);
+        CREATE TABLE IF NOT EXISTS stock_sheet_log (
+            source_id TEXT PRIMARY KEY, synced_at TEXT);
         CREATE INDEX IF NOT EXISTS idx_date ON prints(date);
         CREATE INDEX IF NOT EXISTS idx_city ON prints(city);""")
     for col in ["ALTER TABLE prints ADD COLUMN ist_done INTEGER DEFAULT 0",
@@ -403,6 +406,8 @@ def do_sync():
                (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),total,new_count,f"upd:{upd_count}"))
     db.commit(); db.close()
     startup_fixes()
+    try: sync_stock_sheet()
+    except Exception as e: print(f"[STOCK_SHEET] sync error: {e}")
     return new_count
 
 def auto_sync_loop():
@@ -595,6 +600,78 @@ CATEGORY_TO_ITEM = {
 }
 ITEM_TO_CATEGORY = {v:k for k,v in CATEGORY_TO_ITEM.items()}
 ITEM_TO_CATEGORY["eSUN ePA12 Filament 1.75mm White"] = "eSUN ePA12"
+
+# ---- Google Sheet "Stock Update" -> stock_txn auto-sync ----
+STOCK_SHEET_CITY_MAP = {"Bengaluru":"Bangalore","Bangalore":"Bangalore","Pune":"Pune","Delhi":"Delhi","Hyderabad":"Hyderabad"}
+STOCK_SHEET_MATERIAL_MAP = {
+    "ABS Black (KG)":"eSUN ABS+ Filament 1.75mm Black",
+    "ABS White (KG)":"eSUN ABS+ Filament 1.75mm White",
+    "PLA Black (KG)":"eSUN PLA+ Filament 1.75mm Black",
+    "PLA White (KG)":"eSUN PLA+ Filament 1.75mm White",
+    "TPU Black (KG)":"eSUN TPU-95A Filament 1.75mm Black",
+    "PA12 Black (KG)":"eSUN ePA12 Filament 1.75mm Black",
+    "PA12 White (KG)":"eSUN ePA12 Filament 1.75mm White",
+    "Microfiber Towels (pcs)":"MAX Microfiber Cloth 30x40 cm",
+    "Dettol Sanitizer (units)":"Dettol Alcohol Sanitizer",
+    "Lubricant Tubes (units)":"3D Printer Gear Grease Lubricant",
+    "Glue Sticks 3D (units)":"Glue Stick 3D",
+}
+
+def sync_stock_sheet():
+    """Pull rows from the 'Stock Update' Google Sheet's Log tab (via Apps
+    Script web app URL in STOCK_SHEET_URL) and turn any new IN/OUT rows into
+    stock_txn entries (OPENING/PURCHASE/ISSUE). Already-synced rows (tracked
+    by source_id in stock_sheet_log) are skipped, so this is safe to call
+    repeatedly. ISSUE rows feed straight into the existing /wastage engine."""
+    if not STOCK_SHEET_URL: return 0
+    try:
+        r = requests.get(STOCK_SHEET_URL, timeout=20)
+        payload = r.json()
+        rows = payload.get("rows", []) if isinstance(payload, dict) else payload
+    except Exception as e:
+        print(f"[STOCK_SHEET] fetch error: {e}")
+        return 0
+    db = get_db()
+    items = {row["name"]: row["id"] for row in db.execute("SELECT id,name FROM stock_items").fetchall()}
+    seen = set(r[0] for r in db.execute("SELECT source_id FROM stock_sheet_log").fetchall())
+    now_str = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+    added = 0
+    for row in rows:
+        sid = str(row.get("source_id","")).strip()
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        def mark_seen():
+            db.execute("INSERT OR IGNORE INTO stock_sheet_log (source_id,synced_at) VALUES (?,?)",(sid,now_str))
+        city_raw = str(row.get("city","")).strip()
+        city = STOCK_SHEET_CITY_MAP.get(city_raw, city_raw)
+        if city not in CITIES:
+            mark_seen(); continue
+        mat_raw = str(row.get("material","")).strip()
+        item_name = STOCK_SHEET_MATERIAL_MAP.get(mat_raw, mat_raw)
+        item_id = items.get(item_name)
+        if not item_id:
+            mark_seen(); continue
+        try: qty = float(row.get("qty") or 0)
+        except: qty = 0
+        if qty<=0:
+            mark_seen(); continue
+        direction = str(row.get("direction","")).strip().upper()
+        entered_by = str(row.get("entered_by","")).strip()
+        if direction=="IN":
+            txn_type = "OPENING" if "opening" in entered_by.lower() else "PURCHASE"
+        elif direction=="OUT":
+            txn_type = "ISSUE"
+        else:
+            mark_seen(); continue
+        d = str(row.get("date","")).strip() or date.today().strftime("%Y-%m-%d")
+        db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at) VALUES (?,?,?,?,?,?,?)",
+            (d, city, item_id, txn_type, qty, f"From Sheet ({entered_by or 'manual'})", now_str))
+        mark_seen()
+        added += 1
+    db.commit(); db.close()
+    if added: backup_async()
+    return added
 
 @app.route('/materials')
 def materials():
