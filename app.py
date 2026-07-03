@@ -239,7 +239,13 @@ def compute_record(t, acc):
     cost=int(t.get("costTime") or 0)
     d_wall = int((et-st).total_seconds()/60) if (st and et and et>st) else 0
     d_cost = cost//60 if (60<=cost<=86400) else 0
-    if 0 < d_wall <= 1440:
+    status=STATUS_MAP.get(int(t.get("status") or 0),str(t.get("status","")))
+    if status=="Cancelled":
+        # Cancelled prints: Bambu's costTime is the FULL-PRINT ESTIMATE, not
+        # real elapsed time. Use ONLY the real wall-clock time (start->cancel)
+        # so "machine time wasted on cancelled prints" is accurate.
+        dur = d_wall if 0 < d_wall <= 1440 else 0
+    elif 0 < d_wall <= 1440:
         if d_cost and d_wall > d_cost*1.5 and (d_wall - d_cost) > 120:
             dur = d_cost
         else:
@@ -248,15 +254,10 @@ def compute_record(t, acc):
         dur = d_cost
     else:
         dur = 0
-    status=STATUS_MAP.get(int(t.get("status") or 0),str(t.get("status","")))
     if status in ("Queued","In Process") and et and (datetime.utcnow()-et).total_seconds()>300:
         status="Completed"
     if status=="Queued" and et:
         status="Completed"
-    # Bambu only reports Printing / Success / Cancelled.
-    # Cancelled prints carry the ESTIMATE as duration - zero it out.
-    if status=="Cancelled":
-        dur=0
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -339,7 +340,8 @@ def startup_fixes():
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
         # Bambu only has Printing/Success/Cancelled - convert any old 'Failed' to 'Cancelled'
         db.execute("UPDATE prints SET status='Cancelled' WHERE status='Failed'")
-        db.execute("UPDATE prints SET duration_min=0 WHERE status='Cancelled'")
+        # NOTE: we no longer zero Cancelled duration here - do_sync() now stores
+        # the REAL wall-clock time for cancelled prints (see compute_record()).
         db.commit()
         dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
@@ -412,6 +414,8 @@ def auto_sync_loop():
 
 HOURS_SQL = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN duration_min ELSE 0 END),0)"
 MAT_SQL   = "COALESCE(SUM(CASE WHEN status IN ('Completed','In Process','Failed') THEN material_g ELSE 0 END),0)"
+CANCEL_HOURS_SQL = "COALESCE(SUM(CASE WHEN status='Cancelled' THEN duration_min ELSE 0 END),0)"
+CANCEL_MAT_SQL   = "COALESCE(SUM(CASE WHEN status='Cancelled' THEN material_g ELSE 0 END),0)"
 
 def build_recent_html(rows, today):
     html=""
@@ -465,17 +469,26 @@ def dashboard():
     in_proc  =db.execute("SELECT COUNT(*) FROM prints WHERE status='In Process'").fetchone()[0]
     hrs_total=db.execute(f"SELECT {HOURS_SQL}/60.0 FROM prints WHERE status IN ('Completed','In Process','Failed')").fetchone()[0]
     mat_total=db.execute(f"SELECT {MAT_SQL}/1000.0 FROM prints WHERE status IN ('Completed','In Process','Failed')").fetchone()[0]
+    cancel_hrs_total=db.execute(f"SELECT {CANCEL_HOURS_SQL}/60.0 FROM prints").fetchone()[0]
+    cancel_mat_total=db.execute(f"SELECT {CANCEL_MAT_SQL}/1000.0 FROM prints").fetchone()[0]
     cities_today={}
     for c in CITIES:
         r=db.execute(f"""SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL},
             COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-            COALESCE(SUM(CASE WHEN status='In Process' THEN 1 ELSE 0 END),0)
+            COALESCE(SUM(CASE WHEN status='In Process' THEN 1 ELSE 0 END),0),
+            COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+            {CANCEL_HOURS_SQL}/60.0,{CANCEL_MAT_SQL}
             FROM prints WHERE city=? AND date=?""",(c,today)).fetchone()
-        cities_today[c]={"prints":r[0],"hours":round(float(r[1] or 0),1),"mat_g":round(float(r[2] or 0),1),"ok":r[3],"live":r[4],"color":CITY_COLOR[c]}
+        cities_today[c]={"prints":r[0],"hours":round(float(r[1] or 0),1),"mat_g":round(float(r[2] or 0),1),
+                         "ok":r[3],"live":r[4],
+                         "cancelled":r[5],"cancel_hours":round(float(r[6] or 0),2),"cancel_mat_g":round(float(r[7] or 0),1),
+                         "color":CITY_COLOR[c]}
     today_total={"prints":sum(v["prints"] for v in cities_today.values()),"ok":sum(v["ok"] for v in cities_today.values()),
                  "live":sum(v["live"] for v in cities_today.values()),"hours":round(sum(v["hours"] for v in cities_today.values()),1),
                  "mat_g":round(sum(v["mat_g"] for v in cities_today.values()),1),
-                 "failed":db.execute("SELECT COUNT(*) FROM prints WHERE date=? AND status='Failed'",(today,)).fetchone()[0]}
+                 "cancelled":sum(v["cancelled"] for v in cities_today.values()),
+                 "cancel_hours":round(sum(v["cancel_hours"] for v in cities_today.values()),2),
+                 "cancel_mat_g":round(sum(v["cancel_mat_g"] for v in cities_today.values()),1)}
     recent_rows=db.execute("SELECT date,part_name,printer,city,material,duration_min,material_g,status,start_time,end_time FROM prints WHERE date!='' ORDER BY date DESC,start_time DESC LIMIT 25").fetchall()
     recent_html=build_recent_html(recent_rows,today)
     daily_rows_html=build_daily_html(db,today)
@@ -491,6 +504,7 @@ def dashboard():
     return render_template('dashboard.html',
         total=total,completed=completed,failed=failed,cancelled=cancelled,in_proc=in_proc,
         hrs_total=round(float(hrs_total or 0),1),mat_total=round(float(mat_total or 0),2),
+        cancel_hrs_total=round(float(cancel_hrs_total or 0),1),cancel_mat_total=round(float(cancel_mat_total or 0),2),
         cities_today=cities_today,today_total=today_total,
         recent_html=recent_html,daily_rows_html=daily_rows_html,
         last_sync=last_sync,today=today,city_color=CITY_COLOR,cities=CITIES,
@@ -504,8 +518,14 @@ def city_page(city):
     ov=db.execute(f"""SELECT COUNT(*),
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
         COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
-        {HOURS_SQL}/60.0,{MAT_SQL}/1000.0 FROM prints WHERE city=?""",(city,)).fetchone()
-    td=db.execute(f"SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL} FROM prints WHERE city=? AND date=?",(city,today)).fetchone()
+        {HOURS_SQL}/60.0,{MAT_SQL}/1000.0,
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        {CANCEL_HOURS_SQL}/60.0,{CANCEL_MAT_SQL}/1000.0
+        FROM prints WHERE city=?""",(city,)).fetchone()
+    td=db.execute(f"""SELECT COUNT(*),{HOURS_SQL}/60.0,{MAT_SQL},
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        {CANCEL_HOURS_SQL}/60.0,{CANCEL_MAT_SQL}
+        FROM prints WHERE city=? AND date=?""",(city,today)).fetchone()
     # ---- averages: total run hours / active days & active months ----
     active_days=db.execute("SELECT COUNT(DISTINCT date) FROM prints WHERE city=? AND date!='' AND status IN ('Completed','In Process','Failed') AND duration_min>0",(city,)).fetchone()[0] or 0
     active_months=db.execute("SELECT COUNT(DISTINCT substr(date,1,7)) FROM prints WHERE city=? AND date!='' AND status IN ('Completed','In Process','Failed') AND duration_min>0",(city,)).fetchone()[0] or 0
@@ -529,15 +549,26 @@ def monthly():
     db=get_db()
     rows=db.execute(f"""SELECT substr(date,1,7) as mo,city,COUNT(*),
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
-        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
-        ROUND({HOURS_SQL}/60.0,1),ROUND({MAT_SQL}/1000.0,3)
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        ROUND({HOURS_SQL}/60.0,1),ROUND({MAT_SQL}/1000.0,3),
+        ROUND({CANCEL_HOURS_SQL}/60.0,1),ROUND({CANCEL_MAT_SQL}/1000.0,3)
         FROM prints WHERE date!='' GROUP BY mo,city ORDER BY mo DESC,city""").fetchall()
-    md=defaultdict(lambda:{c:{"total":0,"done":0,"failed":0,"hours":0,"mat_kg":0} for c in CITIES})
+    md=defaultdict(lambda:{c:{"total":0,"done":0,"cancelled":0,"hours":0,"mat_kg":0,"cancel_hours":0,"cancel_mat_kg":0} for c in CITIES})
     for r in rows:
-        if r[1] in CITIES: md[r[0]][r[1]]={"total":r[2],"done":r[3],"failed":r[4],"hours":r[5],"mat_kg":r[6]}
+        if r[1] in CITIES: md[r[0]][r[1]]={"total":r[2],"done":r[3],"cancelled":r[4],"hours":r[5],"mat_kg":r[6],"cancel_hours":r[7],"cancel_mat_kg":r[8]}
     months_list=[]
     for mo in sorted(md.keys(),reverse=True):
-        cd=md[mo]; months_list.append((mo,cd,sum(v["total"] for v in cd.values()),sum(v["done"] for v in cd.values()),sum(v["failed"] for v in cd.values()),round(sum(v["hours"] for v in cd.values()),1),round(sum(v["mat_kg"] for v in cd.values()),2)))
+        cd=md[mo]
+        months_list.append((
+            mo,cd,
+            sum(v["total"] for v in cd.values()),
+            sum(v["done"] for v in cd.values()),
+            sum(v["cancelled"] for v in cd.values()),
+            round(sum(v["hours"] for v in cd.values()),1),
+            round(sum(v["mat_kg"] for v in cd.values()),2),
+            round(sum(v["cancel_hours"] for v in cd.values()),1),
+            round(sum(v["cancel_mat_kg"] for v in cd.values()),2),
+        ))
     db.close()
     return render_template('monthly.html',months_list=months_list,city_color=CITY_COLOR,cities=CITIES)
 
