@@ -280,7 +280,7 @@ def compute_record(t, acc):
     }
  
 def dedup_prints(db):
-    rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min
+    rows=db.execute("""SELECT id,printer,start_time,end_time,status,duration_min,part_name
                        FROM prints
                        WHERE start_time!='' AND end_time!='' AND LENGTH(end_time)>10
                          AND printer NOT IN ('','Unknown')
@@ -292,7 +292,7 @@ def dedup_prints(db):
             st=datetime.strptime(r[2],"%Y-%m-%d %H:%M")
             et=datetime.strptime(r[3],"%Y-%m-%d %H:%M")
             if et<=st: continue
-            by_printer[r[1]].append({"id":r[0],"st":st,"et":et,"status":r[4]})
+            by_printer[r[1]].append({"id":r[0],"st":st,"et":et,"status":r[4],"dur":r[5] or 0,"part":(r[6] or "").strip()})
         except: pass
     rank={"Completed":5,"Failed":4,"Cancelled":3,"In Process":2,"Queued":1}
     to_del=set()
@@ -302,10 +302,18 @@ def dedup_prints(db):
         for j in jobs:
             clash=None
             for k in kept:
-                if j["st"]<k["et"] and k["st"]<j["et"]:
+                # 1) time overlap  OR
+                # 2) same part, same day, within 45 min gap (phantom restart)
+                same_part = j["part"] and j["part"]==k["part"]
+                same_day = j["st"].date()==k["st"].date()
+                gap_min = abs((j["st"]-k["et"]).total_seconds())/60
+                overlap = j["st"]<k["et"] and k["st"]<j["et"]
+                near_restart = same_part and same_day and gap_min<=45
+                if overlap or near_restart:
                     clash=k; break
             if clash:
-                if rank.get(j["status"],0)>rank.get(clash["status"],0):
+                # keep the LONGER real print; if equal length, keep higher status rank
+                if j["dur"]>clash["dur"] or (j["dur"]==clash["dur"] and rank.get(j["status"],0)>rank.get(clash["status"],0)):
                     to_del.add(clash["id"]); kept.remove(clash); kept.append(j)
                 else:
                     to_del.add(j["id"])
@@ -325,6 +333,8 @@ def startup_fixes():
         db.execute("UPDATE prints SET city='Bangalore' WHERE printer LIKE 'Bengaluru%' AND city!='Bangalore'")
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
+        # remove obvious phantom starts: <=2 min AND almost no material (failed restarts)
+        db.execute("DELETE FROM prints WHERE duration_min>0 AND duration_min<=2 AND material_g<=1.0")
         db.commit()
         dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
@@ -903,6 +913,46 @@ def api_sync():
 def api_backup_now():
     ok=do_backup(force=True)
     return jsonify({"ok":ok,"last":_backup_state["last"],"error":_backup_state["error"]})
+ 
+@app.route('/api/debug_bambu')
+def debug_bambu():
+    """Live raw Bambu data to diagnose duplicate/phantom prints.
+    Usage: /api/debug_bambu?city=Delhi  (optionally &date=2026-07-03)"""
+    city=request.args.get("city","Delhi")
+    date_filter=request.args.get("date","")
+    acc=next((a for a in ACCOUNTS if (a["city_override"]==city)),None)
+    if not acc:
+        acc=next((a for a in ACCOUNTS if a["city_override"] is None),None)
+    if not acc: return jsonify({"error":"no account for city"}),400
+    tasks=fetch_tasks(acc["token"])
+    rows=[]
+    seen_ids=defaultdict(int); seen_titles=defaultdict(list)
+    for t in tasks:
+        rec=compute_record(t, acc)
+        if acc["city_override"] is None and rec["city"]!=city: continue
+        if date_filter and rec["date"]!=date_filter: continue
+        tid=str(t.get("id",""))
+        seen_ids[tid]+=1
+        st=parse_dt(t.get("startTime")); et=parse_dt(t.get("endTime"))
+        d_wall=int((et-st).total_seconds()/60) if (st and et and et>st) else 0
+        cost=int(t.get("costTime") or 0)
+        row={"id":tid,"title":rec["part"],"date":rec["date"],
+             "start":rec["start"],"end":rec["end"],
+             "raw_status":t.get("status"),"mapped_status":rec["status"],
+             "wall_min":d_wall,"cost_min":cost//60,"final_dur":rec["dur"],
+             "material_g":rec["matg"],"device":rec["printer"]}
+        rows.append(row)
+        seen_titles[rec["part"]].append(row)
+    rows.sort(key=lambda x:(x["date"],x["start"]),reverse=True)
+    dup_ids={k:v for k,v in seen_ids.items() if v>1}
+    dup_titles={k:len(v) for k,v in seen_titles.items() if len(v)>1}
+    return jsonify({
+        "city":city,"date_filter":date_filter or "all",
+        "total_tasks_from_bambu":len(rows),
+        "duplicate_task_ids":dup_ids,
+        "repeated_titles":dup_titles,
+        "rows":rows[:120]
+    })
  
 @app.route('/api/health')
 def health():
