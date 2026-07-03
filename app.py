@@ -618,7 +618,13 @@ def _process_stock_rows(rows):
         item_name = STOCK_SHEET_MATERIAL_MAP.get(mat_raw, mat_raw)
         item_id = items.get(item_name)
         if not item_id:
-            continue
+            unit = "Kgs" if "(KG)" in mat_raw.upper() else "Piece"
+            db.execute("INSERT OR IGNORE INTO stock_items (name,unit) VALUES (?,?)",(item_name,unit))
+            got = db.execute("SELECT id FROM stock_items WHERE name=?",(item_name,)).fetchone()
+            if not got:
+                continue
+            item_id = got[0]
+            items[item_name] = item_id
         try: qty = float(row.get("qty") or 0)
         except: qty = 0
         if qty<=0:
