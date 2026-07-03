@@ -58,20 +58,20 @@
     <div>
       <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Avg / Active Day</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px;color:{{ color }}">{{ "%.1f"|format(avg.daily) }}h</div>
-      <div style="font-size:12px;color:#6b7280;margin-top:4px">{{ avg.active_days }} din machine chali (all-time)</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px">{{ avg.active_days }} active days (all-time)</div>
     </div>
     <div>
       <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Avg / Month</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ "%.1f"|format(avg.monthly) }}h</div>
-      <div style="font-size:12px;color:#6b7280;margin-top:4px">{{ avg.active_months }} mahine ka data</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px">{{ avg.active_months }} months of data</div>
     </div>
     <div>
       <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Avg / Day (last 30d)</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ "%.1f"|format(avg.daily_30) }}h</div>
-      <div style="font-size:12px;color:#6b7280;margin-top:4px">recent {{ avg.days_30 }} active din</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px">recent {{ avg.days_30 }} active days</div>
     </div>
   </div>
-  <div style="margin-top:12px;font-size:11px;color:#9ca3af">💡 Average = total run hours ÷ jitne din machine actually chali (idle din count nahi hote).</div>
+  <div style="margin-top:12px;font-size:11px;color:#9ca3af">💡 Average = total run hours ÷ days the machine actually ran (idle days not counted).</div>
 </div>
 
 <div style="margin-bottom:16px">
