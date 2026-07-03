@@ -307,14 +307,15 @@ def dedup_prints(db):
         for j in jobs:
             clash=None
             for k in kept:
-                # 1) time overlap  OR
-                # 2) same part, same day, within 45 min gap (phantom restart)
-                same_part = j["part"] and j["part"]==k["part"]
-                same_day = j["st"].date()==k["st"].date()
-                gap_min = abs((j["st"]-k["et"]).total_seconds())/60
+                # Only merge records whose time windows GENUINELY OVERLAP -
+                # that's the only reliable signal of the same physical print
+                # session being reported twice by Bambu (a true phantom).
+                # We do NOT merge just because the same part name printed
+                # again a short time later (e.g. cancel -> reprint, or two
+                # separate back-to-back jobs) - those are real, distinct
+                # prints and must both be kept even if minutes apart.
                 overlap = j["st"]<k["et"] and k["st"]<j["et"]
-                near_restart = same_part and same_day and gap_min<=45
-                if overlap or near_restart:
+                if overlap:
                     clash=k; break
             if clash:
                 # keep the LONGER real print; if equal length, keep higher status rank
