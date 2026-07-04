@@ -108,6 +108,46 @@
     {% endif %}
   </div>
 
+  <!-- Daily City-wise Total -->
+  <div style="background:#fff;border-radius:12px;padding:20px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
+    <div style="font-size:14px;font-weight:700;margin-bottom:16px;color:#374151">
+      🗓️ {{ sel_mo }} — Daily Material Usage (City-wise, kg)
+    </div>
+    {% if daily_list %}
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:600px">
+        <thead>
+          <tr style="background:#f9fafb">
+            <th style="text-align:left;padding:10px 14px;color:#6b7280;font-weight:600;border-bottom:2px solid #e5e7eb">Date</th>
+            {% for city in cities %}
+            <th style="text-align:center;padding:10px 8px;color:{{ city_color[city] }};font-weight:700;border-bottom:2px solid #e5e7eb">{{ city }}</th>
+            {% endfor %}
+            <th style="text-align:center;padding:10px 14px;color:#374151;font-weight:700;border-bottom:2px solid #e5e7eb">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d, row, tot in daily_list %}
+          <tr style="border-bottom:1px solid #f3f4f6"
+            onmouseover="this.style.background='#f9fafb'" onmouseout="this.style.background=''">
+            <td style="padding:9px 14px;font-weight:600;color:#374151">{{ d }}</td>
+            {% for city in cities %}
+            <td style="text-align:center;padding:9px 8px">
+              {% if row[city] > 0 %}
+              <span style="font-weight:600;color:#111">{{ "%.3f"|format(row[city]) }}</span>
+              {% else %}<span style="color:#e5e7eb">—</span>{% endif %}
+            </td>
+            {% endfor %}
+            <td style="text-align:center;padding:9px 14px;font-weight:800;color:#e91e63">{{ "%.3f"|format(tot) }} kg</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="text-align:center;padding:40px;color:#9ca3af">No daily data for {{ sel_mo }}</div>
+    {% endif %}
+  </div>
+
   <!-- All Time Summary -->
   <div style="background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.06)">
     <div style="font-size:14px;font-weight:700;margin-bottom:16px;color:#374151">📊 All Time Filament Usage</div>
