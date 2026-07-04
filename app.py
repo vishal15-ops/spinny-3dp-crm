@@ -10,6 +10,9 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, 'spinny_3dp.db')
 
+# ABS avg flow used to estimate material burned on cancelled prints (g/min)
+CANCEL_FLOW_G_PER_MIN = 0.4
+
 ACCOUNTS = [
     {"label":"Pune_Blr_History","token":"AQAI_IPb10d_E9OJD-cxbBW7_CY_qw8T8Qv8yZ8AEuKBIt2YzYoYj2pgMz-APjAVScBFeNOAVV5425tx6GIte-g98L8_Fcm8hZgd7TlxxfdJzt5L1WnkA9urKvE3PfXKFH4ugqYFO34aJTaB","city_override":None},
     {"label":"Bangalore_New","token":"AQB3PWzBA4I5xpRQEx9x3X35oMnx2KNdD_Gh700Pw7tEdc0ek14YOpH8ByslcCwi-PcYCxcX1CDZc3G8W2rzBNwzXEVvywSTBOmJ-ZodyO8xy5F2OAX25SlDeZAlaojTxI7EiUD0yQsQvssw","city_override":"Bangalore"},
@@ -713,9 +716,26 @@ def materials():
     months_list=sorted(months_set,reverse=True)[:6]
     sel_mo=request.args.get("mo",months_list[0] if months_list else "")
 
+    # Daily city-wise total (kg) for selected month
+    draw=db.execute("""SELECT date,city,COALESCE(SUM(material_g),0)/1000.0
+        FROM prints WHERE date!='' AND substr(date,1,7)=? AND status IN ('Completed','Failed')
+        GROUP BY date,city""",(sel_mo,)).fetchall()
+    _ddata={}
+    for r in draw:
+        d,city,kg=r[0],r[1],round(float(r[2]),3)
+        if city not in CITIES: continue
+        if d not in _ddata: _ddata[d]={c:0.0 for c in CITIES}
+        _ddata[d][city]=kg
+    daily_list=[]
+    for d in sorted(_ddata.keys(),reverse=True):
+        row=_ddata[d]
+        tot=round(sum(row.values()),3)
+        daily_list.append((d,row,tot))
+
     db.close()
     return render_template('materials.html',top=top,mdata=_mdata,months_list=months_list,
-        sel_mo=sel_mo,filaments=FILS,city_color=CITY_COLOR,cities=CITIES)
+        sel_mo=sel_mo,filaments=FILS,city_color=CITY_COLOR,cities=CITIES,
+        daily_list=daily_list)
 
 @app.route('/fails')
 def fails():
@@ -894,8 +914,15 @@ def compute_wastage():
                 is_last=(i+1==len(points))
                 end_dt = points[i+1][0] if not is_last else "9999-12-31 23:59"
                 period_end_display = points[i+1][0] if not is_last else now_dt
-                prints=db.execute("SELECT material,filament_color,material_g FROM prints WHERE city=? AND start_time>=? AND start_time<? AND status IN ('Completed','Failed')",(c,start_dt,end_dt)).fetchall()
-                actual_g=sum(float(p["material_g"] or 0) for p in prints if fil_name(p["material"],p["filament_color"])==cat)
+                prints=db.execute("SELECT material,filament_color,material_g,status,duration_min FROM prints WHERE city=? AND start_time>=? AND start_time<? AND status IN ('Completed','Failed','Cancelled')",(c,start_dt,end_dt)).fetchall()
+                actual_g=0.0
+                for p in prints:
+                    if fil_name(p["material"],p["filament_color"])!=cat: continue
+                    if p["status"]=="Cancelled":
+                        # Bambu reports full planned weight on cancel; estimate real burn from run time
+                        actual_g += round(float(p["duration_min"] or 0)*CANCEL_FLOW_G_PER_MIN,1)
+                    else:
+                        actual_g += float(p["material_g"] or 0)
                 issued_g=qv*1000
                 diff_g=issued_g-actual_g
                 pct=(diff_g/issued_g*100) if issued_g>0 else 0
@@ -1137,17 +1164,6 @@ def health():
     ls=db.execute("SELECT synced_at FROM sync_log ORDER BY id DESC LIMIT 1").fetchone()
     db.close()
     return jsonify({"status":"ok","total":total,"in_process":ip,"last_sync":ls[0] if ls else None})
-
-@app.route('/api/debug_wastage_rows')
-def debug_wastage_rows():
-    db = get_db()
-    rows = db.execute("SELECT id,date,city,item_id,txn_type,qty,note,created_at,txn_time FROM stock_txn WHERE city='Hyderabad' AND txn_type='ISSUE' ORDER BY id DESC").fetchall()
-    items = db.execute("SELECT id,name FROM stock_items").fetchall()
-    db.close()
-    return jsonify({
-        "issue_rows": [dict(r) for r in rows],
-        "items": {r["id"]: r["name"] for r in items}
-    })
 
 init_db()
 load_sheets_cache()
