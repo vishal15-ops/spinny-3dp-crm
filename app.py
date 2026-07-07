@@ -1157,6 +1157,27 @@ def debug_bambu():
         "rows":rows[:120]
     })
 
+@app.route('/api/daily_success')
+def api_daily_success():
+    """Aaj ke Completed prints city-wise — Google Sheet auto-pull ke liye.
+    Optional: ?date=YYYY-MM-DD kisi bhi din ka data nikalne ke liye."""
+    day = request.args.get('date') or datetime.now(IST).strftime('%Y-%m-%d')
+    db = get_db()
+    rows = db.execute("""SELECT city, part_name, printer,
+            date, substr(end_time,12,5) AS end_t
+        FROM prints
+        WHERE status='Completed' AND date=?
+          AND city IN ('Pune','Bangalore','Hyderabad','Delhi')
+        ORDER BY end_time ASC""", (day,)).fetchall()
+    db.close()
+    out = {c: [] for c in CITIES}
+    for r in rows:
+        out[r["city"]].append({
+            "date": r["date"], "part": r["part_name"],
+            "printer": r["printer"], "end_time": r["end_t"]
+        })
+    return jsonify(out)
+
 @app.route('/api/health')
 def health():
     db=get_db(); total=db.execute("SELECT COUNT(*) FROM prints").fetchone()[0]
