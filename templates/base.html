@@ -4,50 +4,88 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Spinny 3DP — {% block title %}{% endblock %}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    :root{--sidebar-bg:#0f1117;--sidebar-w:220px;--body-bg:#f0f2f5;--card-bg:#ffffff;--text-dark:#111827;--text-mid:#4b5563;--text-light:#9ca3af;--border:#e5e7eb;--radius:10px;--shadow:0 1px 4px rgba(0,0,0,.08);--pink:#e91e63}
-    body{font-family:'Inter',sans-serif;background:var(--body-bg);color:var(--text-dark);display:flex;min-height:100vh}
-    .sidebar{width:var(--sidebar-w);min-height:100vh;background:var(--sidebar-bg);position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:100;overflow-y:auto}
-    .sidebar-logo{padding:22px 20px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
-    .app-name{font-size:15px;font-weight:700;color:#fff;letter-spacing:.4px}
-    .app-sub{font-size:11px;color:rgba(255,255,255,.35);margin-top:2px;font-family:'JetBrains Mono',monospace}
-    .nav-section{padding:12px 0 4px}
-    .nav-label{font-size:10px;font-weight:600;letter-spacing:1.2px;color:rgba(255,255,255,.25);padding:0 20px 6px;text-transform:uppercase}
-    .nav-link{display:flex;align-items:center;gap:9px;padding:9px 20px;color:rgba(255,255,255,.6);text-decoration:none;font-size:13.5px;font-weight:500;border-left:3px solid transparent;transition:all .15s}
+    :root{
+      --sidebar-w:224px;
+      --body-bg:#f4f5f8;
+      --card-bg:#ffffff;
+      --text-dark:#111827;
+      --text-mid:#4b5563;
+      --text-light:#9ca3af;
+      --border:#e9eaee;
+      --radius:14px;
+      --shadow:0 1px 3px rgba(16,24,40,.06),0 1px 2px rgba(16,24,40,.04);
+      --shadow-md:0 4px 14px rgba(16,24,40,.08);
+      --pink:#e91e63;
+      --pink-dark:#ad1457;
+    }
+    body{font-family:'Inter',sans-serif;background:var(--body-bg);color:var(--text-dark);display:flex;min-height:100vh;-webkit-font-smoothing:antialiased}
+
+    /* ===== SIDEBAR ===== */
+    .sidebar{width:var(--sidebar-w);min-height:100vh;background:linear-gradient(195deg,#0c0e16 0%,#151726 55%,#1c1330 100%);position:fixed;top:0;left:0;display:flex;flex-direction:column;z-index:100;overflow-y:auto;box-shadow:2px 0 20px rgba(0,0,0,.25)}
+    .sidebar-logo{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,.07)}
+    .app-name{font-size:15.5px;font-weight:800;color:#fff;letter-spacing:.3px;display:flex;align-items:center;gap:8px}
+    .app-sub{font-size:11px;color:rgba(255,255,255,.38);margin-top:3px;font-family:'JetBrains Mono',monospace;letter-spacing:.02em}
+    .nav-section{padding:14px 0 4px}
+    .nav-label{font-size:10px;font-weight:700;letter-spacing:1.3px;color:rgba(255,255,255,.22);padding:0 20px 7px;text-transform:uppercase}
+    .nav-link{display:flex;align-items:center;gap:10px;padding:9.5px 20px;color:rgba(255,255,255,.58);text-decoration:none;font-size:13.5px;font-weight:500;border-left:3px solid transparent;transition:all .15s;position:relative}
     .nav-link:hover{background:rgba(255,255,255,.05);color:#fff}
-    .nav-link.active{background:rgba(255,255,255,.07);color:#fff;border-left-color:var(--pink)}
-    .city-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .nav-link.active{background:linear-gradient(90deg,rgba(233,30,99,.16),transparent);color:#fff;border-left-color:var(--pink);font-weight:600}
+    .nav-link svg{opacity:.85;flex-shrink:0}
+    .city-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 6px currentColor}
     .sidebar-footer{margin-top:auto;padding:16px 16px 20px;border-top:1px solid rgba(255,255,255,.07)}
-    .sync-btn{width:100%;padding:10px;background:var(--pink);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s}
-    .sync-btn:hover{background:#c2185b}
-    .sync-btn:disabled{background:#555;cursor:not-allowed}
-    .main{margin-left:var(--sidebar-w);flex:1;padding:28px 30px}
-    .page-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:22px}
-    .page-title{font-size:20px;font-weight:700}
-    .page-meta{font-size:12px;color:var(--text-light)}
+    .sync-btn{width:100%;padding:10.5px;background:linear-gradient(135deg,var(--pink),var(--pink-dark));color:#fff;border:none;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;transition:transform .15s,box-shadow .15s;box-shadow:0 3px 10px rgba(233,30,99,.35)}
+    .sync-btn:hover{transform:translateY(-1px);box-shadow:0 5px 16px rgba(233,30,99,.45)}
+    .sync-btn:disabled{background:#4b5563;cursor:not-allowed;box-shadow:none}
+    .main{margin-left:var(--sidebar-w);flex:1;padding:28px 32px}
+
+    /* ===== HEADERS ===== */
+    .page-header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:8px}
+    .page-title{font-size:21px;font-weight:800;color:#0f172a;letter-spacing:-.01em}
+    .page-meta{font-size:12.5px;color:var(--text-light)}
+
+    /* ===== CARDS ===== */
     .cards-row{display:grid;gap:14px;margin-bottom:22px}
     .cards-4{grid-template-columns:repeat(4,1fr)}
     .cards-3{grid-template-columns:repeat(3,1fr)}
     .cards-2{grid-template-columns:repeat(2,1fr)}
-    .card{background:var(--card-bg);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);border:1px solid var(--border)}
-    .card-label{font-size:11.5px;color:var(--text-light);font-weight:500;text-transform:uppercase;letter-spacing:.5px}
-    .card-value{font-size:26px;font-weight:800;margin-top:6px;line-height:1}
-    .card-sub{font-size:12px;color:var(--text-mid);margin-top:5px}
-    .city-card{background:var(--card-bg);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);border:1px solid var(--border);border-top:3px solid}
+    .card{background:var(--card-bg);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);border:1px solid var(--border);transition:box-shadow .15s,transform .15s}
+    .card:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+    .card-label{font-size:11.5px;color:var(--text-light);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+    .card-value{font-size:27px;font-weight:800;margin-top:7px;line-height:1;letter-spacing:-.01em}
+    .card-sub{font-size:12px;color:var(--text-mid);margin-top:6px}
+
+    /* Gradient KPI variants (used by dashboard hero stats) */
+    .gcard{border-radius:var(--radius);padding:18px 20px;color:#fff;box-shadow:var(--shadow-md);position:relative;overflow:hidden;transition:transform .15s}
+    .gcard:hover{transform:translateY(-2px)}
+    .gcard .card-label{color:rgba(255,255,255,.85)}
+    .gcard .card-value{color:#fff}
+    .gcard .card-sub{color:rgba(255,255,255,.8)}
+    .g-blue{background:linear-gradient(135deg,#2563eb,#1e3a8a)}
+    .g-green{background:linear-gradient(135deg,#16a34a,#14532d)}
+    .g-red{background:linear-gradient(135deg,#dc2626,#7f1d1d)}
+    .g-pink{background:linear-gradient(135deg,#e91e63,#9d174d)}
+    .g-purple{background:linear-gradient(135deg,#7c3aed,#4c1d95)}
+    .g-amber{background:linear-gradient(135deg,#f59e0b,#92400e)}
+    .g-dark{background:linear-gradient(135deg,#1f2937,#0b0f17)}
+
+    .city-card{background:var(--card-bg);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);border:1px solid var(--border);border-top:3px solid;transition:box-shadow .15s,transform .15s}
+    .city-card:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
     .city-card-name{font-size:13px;font-weight:700;margin-bottom:12px}
+
     .table-card{background:var(--card-bg);border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid var(--border);overflow:hidden;margin-bottom:20px}
-    .table-card-header{padding:14px 18px;border-bottom:1px solid var(--border);font-size:13.5px;font-weight:600;display:flex;align-items:center;justify-content:space-between}
+    .table-card-header{padding:14px 18px;border-bottom:1px solid var(--border);font-size:13.5px;font-weight:700;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(180deg,#fafbfc,#ffffff)}
     .table-card-header small{font-size:11px;color:var(--text-light);font-weight:400}
     table{width:100%;border-collapse:collapse;font-size:13px}
-    thead th{padding:9px 14px;text-align:left;font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text-light);background:#fafafa;border-bottom:1px solid var(--border)}
+    thead th{padding:10px 14px;text-align:left;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-light);background:#fafbfc;border-bottom:1px solid var(--border)}
     tbody tr{border-bottom:1px solid var(--border)}
     tbody tr:last-child{border-bottom:none}
-    tbody tr:hover{background:#fafafa}
-    tbody td{padding:9px 14px;color:var(--text-dark)}
+    tbody tr:hover{background:#fafbfc}
+    tbody td{padding:9.5px 14px;color:var(--text-dark)}
     .td-part{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+    .badge{display:inline-block;padding:2.5px 9px;border-radius:20px;font-size:11px;font-weight:700}
     .b-completed{background:#dcfce7;color:#166534}
     .b-failed{background:#fee2e2;color:#991b1b}
     .b-printing{background:#dbeafe;color:#1e40af}
@@ -55,8 +93,8 @@
     .b-queued{background:#fef9c3;color:#854d0e}
     .b-fulfilled{background:#dcfce7;color:#166534}
     .b-pending{background:#fef9c3;color:#854d0e}
-    .b-city{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;color:#fff}
-    .section-title{font-size:14px;font-weight:600;color:var(--text-mid);margin:20px 0 10px;text-transform:uppercase;letter-spacing:.5px}
+    .b-city{display:inline-block;padding:2.5px 9px;border-radius:20px;font-size:11px;font-weight:700;color:#fff}
+    .section-title{font-size:13.5px;font-weight:700;color:var(--text-mid);margin:22px 0 11px;text-transform:uppercase;letter-spacing:.04em;display:flex;align-items:center;gap:8px}
     .mono{font-family:'JetBrains Mono',monospace;font-size:12px}
     .text-green{color:#16a34a}
     .text-red{color:#dc2626}
@@ -79,10 +117,10 @@
   </div>
   <div class="nav-section">
     <div class="nav-label">Cities</div>
-    <a href="/city/Pune"      class="nav-link {% if active=='Pune' %}active{% endif %}"><span class="city-dot" style="background:#2196F3"></span>Pune</a>
-    <a href="/city/Bangalore" class="nav-link {% if active=='Bangalore' %}active{% endif %}"><span class="city-dot" style="background:#9C27B0"></span>Bangalore</a>
-    <a href="/city/Hyderabad" class="nav-link {% if active=='Hyderabad' %}active{% endif %}"><span class="city-dot" style="background:#FF9800"></span>Hyderabad</a>
-    <a href="/city/Delhi"     class="nav-link {% if active=='Delhi' %}active{% endif %}"><span class="city-dot" style="background:#43A047"></span>Delhi</a>
+    <a href="/city/Pune"      class="nav-link {% if active=='Pune' %}active{% endif %}"><span class="city-dot" style="background:#2196F3;color:#2196F3"></span>Pune</a>
+    <a href="/city/Bangalore" class="nav-link {% if active=='Bangalore' %}active{% endif %}"><span class="city-dot" style="background:#9C27B0;color:#9C27B0"></span>Bangalore</a>
+    <a href="/city/Hyderabad" class="nav-link {% if active=='Hyderabad' %}active{% endif %}"><span class="city-dot" style="background:#FF9800;color:#FF9800"></span>Hyderabad</a>
+    <a href="/city/Delhi"     class="nav-link {% if active=='Delhi' %}active{% endif %}"><span class="city-dot" style="background:#43A047;color:#43A047"></span>Delhi</a>
   </div>
   <div class="nav-section">
     <div class="nav-label">Reports</div>
