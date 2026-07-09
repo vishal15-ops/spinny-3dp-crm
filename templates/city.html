@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% set active = 'city_' + city %}
+{% set active = city %}
 {% block title %}{{ city }} — 3DP Dashboard{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -10,24 +10,22 @@
 </div>
 
 <div class="cards-row cards-4">
-  <div class="card">
+  <div class="gcard g-dark">
     <div class="card-label">Total Prints</div>
     <div class="card-value">{{ ov[0] }}</div>
-    <div class="card-sub" style="color:{{ color }}">{{ city }} all time</div>
+    <div class="card-sub">{{ city }} all time</div>
   </div>
-  <div class="card">
+  <div class="gcard {% if ov[0]>0 and (ov[1]/ov[0]*100)|int>=75 %}g-green{% else %}g-red{% endif %}">
     <div class="card-label">Success Rate</div>
-    <div class="card-value {% if ov[0]>0 and (ov[1]/ov[0]*100)|int>=75 %}text-green{% else %}text-red{% endif %}">
-      {{ "%.0f"|format(ov[1]/ov[0]*100 if ov[0] else 0) }}%
-    </div>
+    <div class="card-value">{{ "%.0f"|format(ov[1]/ov[0]*100 if ov[0] else 0) }}%</div>
     <div class="card-sub">{{ ov[1] }} done / {{ ov[5] }} cancelled</div>
   </div>
-  <div class="card">
+  <div class="gcard g-blue">
     <div class="card-label">Machine Hours</div>
     <div class="card-value">{{ "%.1f"|format(ov[3]) }}h</div>
     <div class="card-sub">Successful prints — total run time</div>
   </div>
-  <div class="card">
+  <div class="gcard g-purple">
     <div class="card-label">Material Used</div>
     <div class="card-value">{{ "%.2f"|format(ov[4]) }}kg</div>
     <div class="card-sub">Successful prints — total filament</div>
@@ -52,34 +50,34 @@
   </div>
 </div>
 
-<div class="section-title">Today — {{ today }}</div>
-<div class="card" style="margin-bottom:20px;border-left:4px solid {{ color }}">
+<div class="section-title">📍 Today — {{ today }}</div>
+<div class="gcard g-pink" style="margin-bottom:20px">
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Parts Today</div>
+      <div style="font-size:11px;opacity:.8;text-transform:uppercase">Parts Today</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ td[0] }}</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Hours Today (Success)</div>
+      <div style="font-size:11px;opacity:.8;text-transform:uppercase">Hours Today (Success)</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ "%.1f"|format(td[1]) }}h</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#9ca3af;text-transform:uppercase">Material Today (Success)</div>
+      <div style="font-size:11px;opacity:.8;text-transform:uppercase">Material Today (Success)</div>
       <div style="font-size:32px;font-weight:800;margin-top:4px">{{ "%.0f"|format(td[2]) }}g</div>
     </div>
   </div>
-  <div style="margin-top:14px;padding-top:14px;border-top:1px solid #f3f4f6;display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
+  <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.2);display:grid;grid-template-columns:repeat(3,1fr);gap:20px">
     <div>
-      <div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancelled Today</div>
-      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#dc2626">{{ td[3] }}</div>
+      <div style="font-size:11px;color:#fecaca;text-transform:uppercase;font-weight:600">Cancelled Today</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#fecaca">{{ td[3] }}</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancel Time Today</div>
-      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#dc2626">{{ "%.1f"|format(td[4]) }}h</div>
+      <div style="font-size:11px;color:#fecaca;text-transform:uppercase;font-weight:600">Cancel Time Today</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#fecaca">{{ "%.1f"|format(td[4]) }}h</div>
     </div>
     <div>
-      <div style="font-size:11px;color:#dc2626;text-transform:uppercase;font-weight:600">Cancel Material Today</div>
-      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#dc2626">{{ "%.0f"|format(td[5]) }}g</div>
+      <div style="font-size:11px;color:#fecaca;text-transform:uppercase;font-weight:600">Cancel Material Today</div>
+      <div style="font-size:24px;font-weight:800;margin-top:4px;color:#fecaca">{{ "%.0f"|format(td[5]) }}g</div>
     </div>
   </div>
 </div>
