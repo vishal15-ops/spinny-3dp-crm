@@ -12,6 +12,11 @@ DB_PATH  = os.path.join(BASE_DIR, 'spinny_3dp.db')
 
 # ABS avg flow used to estimate material burned on cancelled prints (g/min)
 CANCEL_FLOW_G_PER_MIN = 0.4
+# No real FDM print (even a big multi-plate automotive part) consumes material
+# faster than this — actual Spinny print history averages ~0.2-0.6 g/min.
+# Used as a sanity check: if reported weight implies a faster rate than this,
+# the weight/duration/status combo is bogus (Bambu glitch), not a real number.
+MAX_PLAUSIBLE_G_PER_MIN = 5.0
 
 ACCOUNTS = [
     {"label":"Pune_Blr_History","token":"AQAI_IPb10d_E9OJD-cxbBW7_CY_qw8T8Qv8yZ8AEuKBIt2YzYoYj2pgMz-APjAVScBFeNOAVV5425tx6GIte-g98L8_Fcm8hZgd7TlxxfdJzt5L1WnkA9urKvE3PfXKFH4ugqYFO34aJTaB","city_override":None},
@@ -274,18 +279,27 @@ def compute_record(t, acc):
         status="Completed"
     if status=="Queued" and et:
         status="Completed"
+    weight_g = float(t.get("weight") or 0)
     # BAMBU BUG FIX: print start hote hi cancel hua par Bambu ne "Completed" + full
     # planned weight bhej diya (e.g. 691g in 4 min = impossible). Agar wall time
     # slicer estimate ke 10% se bhi kam hai (ya 3 min se kam), toh ye fake success hai.
     if status=="Completed" and d_cost>0 and 0<=d_wall<max(3, int(d_cost*0.1)):
+        status="Cancelled"
+    # MATERIAL-RATE SANITY CHECK: even without a cost estimate to compare against,
+    # a reported weight that implies an impossible g/min rate for the actual wall
+    # time (e.g. 177g in 4 min = 44g/min) means the weight/status is bogus — it
+    # was really an early/partial print, not a genuine completion.
+    if status=="Completed" and d_wall>0 and (weight_g/d_wall)>MAX_PLAUSIBLE_G_PER_MIN:
         status="Cancelled"
     # WIFI-DROP FALSE-CANCEL FIX: designer's phone/app loses WiFi connection to the
     # printer mid-print and Bambu marks the job "Cancelled" even though the printer
     # kept running physically. A genuine manual cancel almost always happens within
     # the first ~2 minutes; anything that ran longer than that before showing
     # Cancelled is very likely just a lost-connection glitch, not a real cancel —
-    # so we recount it as Completed instead.
-    if status=="Cancelled" and d_wall>2:
+    # so we recount it as Completed instead. BUT only if the reported weight is
+    # still a plausible rate for that duration — otherwise the weight itself is
+    # bogus (same Bambu glitch as above) and this must stay Cancelled.
+    if status=="Cancelled" and d_wall>2 and (weight_g/d_wall)<=MAX_PLAUSIBLE_G_PER_MIN:
         status="Completed"
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
@@ -362,9 +376,13 @@ def startup_fixes():
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
         db.execute("UPDATE prints SET status='Cancelled' WHERE status='Failed'")
         # WIFI-DROP FALSE-CANCEL FIX (retroactive): already-stored Cancelled prints
-        # that actually ran longer than 2 minutes are near-certainly lost-connection
-        # glitches, not real cancels — recount them as Completed.
-        db.execute("UPDATE prints SET status='Completed' WHERE status='Cancelled' AND duration_min>2")
+        # that ran longer than 2 minutes AND have a plausible material rate are
+        # near-certainly lost-connection glitches, not real cancels.
+        db.execute(f"UPDATE prints SET status='Completed' WHERE status='Cancelled' AND duration_min>2 AND (material_g*1.0/duration_min)<={MAX_PLAUSIBLE_G_PER_MIN}")
+        # MATERIAL-RATE SANITY FIX (retroactive): already-stored Completed prints
+        # whose weight implies an impossible g/min rate are bogus (Bambu glitch,
+        # not a real completion) — recount them as Cancelled.
+        db.execute(f"UPDATE prints SET status='Cancelled' WHERE status='Completed' AND duration_min>0 AND (material_g*1.0/duration_min)>{MAX_PLAUSIBLE_G_PER_MIN}")
         db.commit()
         dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
@@ -827,7 +845,7 @@ def stock_page():
     def has_any_all(iid):
         return any(has_any(c,iid) for c in CITIES)
     if cf=="All":
-        head="".join(f"<th style='text-align:center;padding:10px 8px;color:{CITY_COLOR[c]};font-weight:700;border-bottom:2px solid #e5e7eb'>{c}</th>" for c in CITIES)
+        head="".join(f"<th style='text-align:center;padding:11px 8px;color:{CITY_COLOR[c]};font-weight:800;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>{c}</th>" for c in CITIES)
         rows=""
         for it in items:
             if not has_any_all(it["id"]):
@@ -841,17 +859,17 @@ def stock_page():
                 if not present:
                     cells+="<td style='text-align:center;padding:9px 8px;color:#d1d5db'>—</td>"
                     continue
-                if v<=0: col="#dc2626"; warn="⚠ "
-                elif rl>0 and v<=rl: col="#d97706"; warn="⚠ "
-                else: col="#111827"; warn=""
-                cells+=f"<td style='text-align:center;padding:9px 8px;font-weight:600;color:{col}'>{warn}{_fmt_qty(v)}</td>"
-            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
-                f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>{cells}"
-                f"<td style='text-align:center;padding:9px 8px;font-weight:700'>{_fmt_qty(tot)}</td></tr>")
-        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f9fafb'>"
-            f"<th style='text-align:left;padding:10px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Material</th>"
-            f"<th style='text-align:left;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Unit</th>{head}"
-            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Total</th></tr></thead><tbody>{rows}</tbody></table>")
+                if v<=0: bg="#fee2e2"; col="#dc2626"; warn="⚠ "
+                elif rl>0 and v<=rl: bg="#fef3c7"; col="#b45309"; warn="⚠ "
+                else: bg="#f3f4f6"; col="#111827"; warn=""
+                cells+=f"<td style='text-align:center;padding:8px 6px'><span style='display:inline-block;min-width:44px;padding:3px 8px;border-radius:20px;background:{bg};font-weight:700;color:{col};font-size:12px'>{warn}{_fmt_qty(v)}</span></td>"
+            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:10px 14px;font-weight:600;color:#111827'>{_html.escape(it['name'])}</td>"
+                f"<td style='padding:10px 8px;color:#9ca3af;font-size:12px'>{it['unit']}</td>{cells}"
+                f"<td style='text-align:center;padding:10px 8px;font-weight:800;color:var(--pink)'>{_fmt_qty(tot)}</td></tr>")
+        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:linear-gradient(180deg,#fafbfc,#f3f4f6)'>"
+            f"<th style='text-align:left;padding:11px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Material</th>"
+            f"<th style='text-align:left;padding:11px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Unit</th>{head}"
+            f"<th style='text-align:center;padding:11px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Total</th></tr></thead><tbody>{rows}</tbody></table>")
     else:
         rows=""
         for it in items:
@@ -859,22 +877,22 @@ def stock_page():
                 continue
             rl=float(it["reorder_level"] or 0)
             a=agg[(cf,it["id"])]; v=a["OPENING"]+a["PURCHASE"]-a["ISSUE"]
-            if v<=0: col="#dc2626"; warn="⚠ "
-            elif rl>0 and v<=rl: col="#d97706"; warn="⚠ "
-            else: col="#111827"; warn=""
-            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:9px 14px'>{_html.escape(it['name'])}</td>"
-                f"<td style='padding:9px 8px;color:#6b7280'>{it['unit']}</td>"
-                f"<td style='text-align:center;padding:9px 8px'>{_fmt_qty(a['OPENING'])}</td>"
-                f"<td style='text-align:center;padding:9px 8px;color:#16a34a'>+{_fmt_qty(a['PURCHASE'])}</td>"
-                f"<td style='text-align:center;padding:9px 8px;color:#dc2626'>−{_fmt_qty(a['ISSUE'])}</td>"
-                f"<td style='text-align:center;padding:9px 8px;font-weight:700;color:{col}'>{warn}{_fmt_qty(v)}</td></tr>")
-        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:#f9fafb'>"
-            f"<th style='text-align:left;padding:10px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Material</th>"
-            f"<th style='text-align:left;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Unit</th>"
-            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Opening</th>"
-            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Purchased</th>"
-            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Issued/Used</th>"
-            f"<th style='text-align:center;padding:10px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb'>Current Stock</th></tr></thead><tbody>{rows}</tbody></table>")
+            if v<=0: bg="#fee2e2"; col="#dc2626"; warn="⚠ "
+            elif rl>0 and v<=rl: bg="#fef3c7"; col="#b45309"; warn="⚠ "
+            else: bg="#f3f4f6"; col="#111827"; warn=""
+            rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'><td style='padding:10px 14px;font-weight:600;color:#111827'>{_html.escape(it['name'])}</td>"
+                f"<td style='padding:10px 8px;color:#9ca3af;font-size:12px'>{it['unit']}</td>"
+                f"<td style='text-align:center;padding:10px 8px'>{_fmt_qty(a['OPENING'])}</td>"
+                f"<td style='text-align:center;padding:10px 8px;color:#16a34a;font-weight:600'>+{_fmt_qty(a['PURCHASE'])}</td>"
+                f"<td style='text-align:center;padding:10px 8px;color:#dc2626;font-weight:600'>−{_fmt_qty(a['ISSUE'])}</td>"
+                f"<td style='text-align:center;padding:8px 8px'><span style='display:inline-block;min-width:50px;padding:3px 10px;border-radius:20px;background:{bg};font-weight:800;color:{col};font-size:13px'>{warn}{_fmt_qty(v)}</span></td></tr>")
+        summary_html=(f"<table style='width:100%;border-collapse:collapse;font-size:13px'><thead><tr style='background:linear-gradient(180deg,#fafbfc,#f3f4f6)'>"
+            f"<th style='text-align:left;padding:11px 14px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Material</th>"
+            f"<th style='text-align:left;padding:11px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Unit</th>"
+            f"<th style='text-align:center;padding:11px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Opening</th>"
+            f"<th style='text-align:center;padding:11px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Purchased</th>"
+            f"<th style='text-align:center;padding:11px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Issued/Used</th>"
+            f"<th style='text-align:center;padding:11px 8px;color:#6b7280;border-bottom:2px solid #e5e7eb;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Current Stock</th></tr></thead><tbody>{rows}</tbody></table>")
     tabs=""
     for c in ["All"]+CITIES:
         on=(c==cf)
