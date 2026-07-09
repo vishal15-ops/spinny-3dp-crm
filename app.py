@@ -279,6 +279,14 @@ def compute_record(t, acc):
     # slicer estimate ke 10% se bhi kam hai (ya 3 min se kam), toh ye fake success hai.
     if status=="Completed" and d_cost>0 and 0<=d_wall<max(3, int(d_cost*0.1)):
         status="Cancelled"
+    # WIFI-DROP FALSE-CANCEL FIX: designer's phone/app loses WiFi connection to the
+    # printer mid-print and Bambu marks the job "Cancelled" even though the printer
+    # kept running physically. A genuine manual cancel almost always happens within
+    # the first ~2 minutes; anything that ran longer than that before showing
+    # Cancelled is very likely just a lost-connection glitch, not a real cancel —
+    # so we recount it as Completed instead.
+    if status=="Cancelled" and d_wall>2:
+        status="Completed"
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -353,6 +361,10 @@ def startup_fixes():
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
         db.execute("UPDATE prints SET status='Cancelled' WHERE status='Failed'")
+        # WIFI-DROP FALSE-CANCEL FIX (retroactive): already-stored Cancelled prints
+        # that actually ran longer than 2 minutes are near-certainly lost-connection
+        # glitches, not real cancels — recount them as Completed.
+        db.execute("UPDATE prints SET status='Completed' WHERE status='Cancelled' AND duration_min>2")
         db.commit()
         dedup_prints(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
@@ -944,6 +956,7 @@ def build_wastage_html(rows):
         return "<tr><td colspan='8' style='padding:24px;text-align:center;color:#9ca3af'>No Issue entries found yet — add an Issue entry on the Daily Materials page first, then wastage will be calculated</td></tr>"
     html=""
     for r in rows:
+        row_bg=""
         if r["status"]=="ongoing":
             status_badge="<span style='background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>🔄 Ongoing</span>"
             label="Remaining"
@@ -951,26 +964,49 @@ def build_wastage_html(rows):
         else:
             status_badge="<span style='background:#f3f4f6;color:#374151;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600'>✅ Closed</span>"
             label="Wastage"
-            if r["pct"]<0: col="#7c3aed"
+            if r["pct"]<0:
+                col="#7c3aed"; row_bg="background:#f5f3ff;"
             elif r["pct"]<=10: col="#16a34a"
             elif r["pct"]<=25: col="#d97706"
-            else: col="#dc2626"
-        html+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
+            else: col="#dc2626"; row_bg="background:#fef2f2;"
+        flag = "<div style='font-size:10px;color:#7c3aed;font-weight:700;margin-top:2px'>⚠ Issue entry likely missing</div>" if r["pct"]<0 else ""
+        html+=(f"<tr style='border-bottom:1px solid #f3f4f6;{row_bg}'>"
             f"<td style='padding:8px 12px;white-space:nowrap;color:#6b7280;font-size:12px'>{r['date']} → {r['period_end']}</td>"
             f"<td style='padding:8px 10px'>{status_badge}</td>"
             f"<td style='padding:8px 10px'><span style='color:{CITY_COLOR.get(r['city'],'#6b7280')};font-weight:600'>{r['city']}</span></td>"
             f"<td style='padding:8px 10px'>{_html.escape(r['material'])}</td>"
             f"<td style='padding:8px 10px;text-align:center'>{r['issued_g']}g</td>"
             f"<td style='padding:8px 10px;text-align:center'>{r['actual_g']}g</td>"
-            f"<td style='padding:8px 10px;text-align:center;font-weight:600;color:{col}'>{label}: {r['diff_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center;font-weight:600;color:{col}'>{label}: {r['diff_g']}g{flag}</td>"
             f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{col}'>{r['pct']}%</td></tr>")
     return html
+
+def build_alert_html(rows):
+    """Prominent banner for spools where actual usage exceeds what was issued —
+    almost always means an Issue entry is missing/incomplete in Daily Materials,
+    not a real over-use. Only shown when such rows exist."""
+    problems = [r for r in rows if r["pct"] < 0]
+    if not problems:
+        return ""
+    items = ""
+    for r in problems:
+        shortfall = abs(r["diff_g"])
+        items += (f"<li style='margin-bottom:6px'>"
+            f"<b style='color:{CITY_COLOR.get(r['city'],'#6b7280')}'>{r['city']}</b> — {_html.escape(r['material'])} "
+            f"({r['date']} → {r['period_end']}): used <b>{r['actual_g']}g</b> but only <b>{r['issued_g']}g</b> was issued "
+            f"— <b style='color:#7c3aed'>~{shortfall:.0f}g not logged</b>. Add a missing Issue entry on Daily Materials to fix.</li>")
+    return (f"<div style='background:linear-gradient(135deg,#fef2f2,#fee2e2);border:1.5px solid #fca5a5;"
+        f"border-radius:12px;padding:16px 20px;margin-bottom:18px'>"
+        f"<div style='font-size:13.5px;font-weight:800;color:#991b1b;margin-bottom:8px'>"
+        f"🚨 {len(problems)} spool(s) show more material used than issued — an Issue entry is likely missing</div>"
+        f"<ul style='margin:0 0 0 18px;font-size:12.5px;color:#7f1d1d;line-height:1.5'>{items}</ul></div>")
 
 @app.route('/wastage')
 def wastage_page():
     rows=compute_wastage()
     wastage_html=build_wastage_html(rows)
-    return render_template('wastage.html',wastage_html=wastage_html,city_color=CITY_COLOR,cities=CITIES)
+    alert_html=build_alert_html(rows)
+    return render_template('wastage.html',wastage_html=wastage_html,alert_html=alert_html,city_color=CITY_COLOR,cities=CITIES)
 
 def _date_presets():
     today = date.today()
