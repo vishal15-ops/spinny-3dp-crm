@@ -972,6 +972,130 @@ def wastage_page():
     wastage_html=build_wastage_html(rows)
     return render_template('wastage.html',wastage_html=wastage_html,city_color=CITY_COLOR,cities=CITIES)
 
+def _date_presets():
+    today = date.today()
+    this_month_start = today.replace(day=1)
+    last_month_end = this_month_start - timedelta(days=1)
+    last_month_start = last_month_end.replace(day=1)
+    return {
+        "today":      (today, today),
+        "7d":         (today - timedelta(days=6), today),
+        "30d":        (today - timedelta(days=29), today),
+        "this_month": (this_month_start, today),
+        "last_month": (last_month_start, last_month_end),
+    }
+
+@app.route('/analytics')
+def analytics():
+    presets = {k: (v[0].strftime("%Y-%m-%d"), v[1].strftime("%Y-%m-%d")) for k, v in _date_presets().items()}
+    from_date = request.args.get('from', '').strip()
+    to_date   = request.args.get('to', '').strip()
+    if not from_date or not to_date:
+        from_date, to_date = presets["7d"]
+
+    db = get_db()
+
+    overall = db.execute(f"""SELECT COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+        {HOURS_SQL}/60.0, {MAT_SQL}/1000.0
+        FROM prints WHERE date>=? AND date<=?""", (from_date, to_date)).fetchone()
+
+    total_jobs = overall[0] or 0
+    completed  = overall[1] or 0
+    cancelled  = overall[2] or 0
+    failed     = overall[3] or 0
+    total_hours  = round(float(overall[4] or 0), 1)
+    total_mat_kg = round(float(overall[5] or 0), 2)
+    success_rate = round((completed / total_jobs * 100), 1) if total_jobs else 0
+
+    try:
+        d_from_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        d_to_obj   = datetime.strptime(to_date, "%Y-%m-%d").date()
+        days_in_range = max((d_to_obj - d_from_obj).days + 1, 1)
+    except Exception:
+        days_in_range = 1
+
+    avg_jobs_day  = round(total_jobs / days_in_range, 1)
+    avg_hours_day = round(total_hours / days_in_range, 1)
+    avg_mat_day   = round(total_mat_kg / days_in_range, 2)
+
+    machine_rows = db.execute(f"""SELECT printer, city, COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+        {HOURS_SQL}/60.0, {MAT_SQL}
+        FROM prints WHERE date>=? AND date<=?
+        GROUP BY printer, city ORDER BY city, printer""", (from_date, to_date)).fetchall()
+
+    machines = []
+    for r in machine_rows:
+        tot, comp, canc, fail = r[2] or 0, r[3] or 0, r[4] or 0, r[5] or 0
+        hrs  = round(float(r[6] or 0), 1)
+        matg = round(float(r[7] or 0), 1)
+        sr = round((comp / tot * 100), 1) if tot else 0
+        machines.append({
+            "printer": r[0] or "Unknown", "city": r[1] or "Unknown",
+            "total": tot, "completed": comp, "cancelled": canc, "failed": fail,
+            "hours": hrs, "material_g": matg, "success_rate": sr,
+            "avg_hours_day": round(hrs / days_in_range, 2),
+        })
+
+    city_rows = db.execute(f"""SELECT city, COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Failed' THEN 1 ELSE 0 END),0),
+        {HOURS_SQL}/60.0, {MAT_SQL}/1000.0
+        FROM prints WHERE date>=? AND date<=?
+        GROUP BY city ORDER BY city""", (from_date, to_date)).fetchall()
+
+    city_stats = []
+    for r in city_rows:
+        tot, comp, canc, fail = r[1] or 0, r[2] or 0, r[3] or 0, r[4] or 0
+        hrs   = round(float(r[5] or 0), 1)
+        matkg = round(float(r[6] or 0), 2)
+        sr = round((comp / tot * 100), 1) if tot else 0
+        city_stats.append({
+            "city": r[0] or "Unknown", "total": tot, "completed": comp,
+            "cancelled": canc, "failed": fail, "hours": hrs,
+            "material_kg": matkg, "success_rate": sr,
+            "color": CITY_COLOR.get(r[0], "#999"),
+            "avg_hours_day": round(hrs / days_in_range, 2),
+        })
+
+    mat_rows = db.execute("""SELECT city, material, filament_color, COUNT(*),
+        COALESCE(SUM(material_g),0)
+        FROM prints WHERE date>=? AND date<=? AND status IN ('Completed','Failed')
+        GROUP BY city, material, filament_color""", (from_date, to_date)).fetchall()
+
+    mat_agg = defaultdict(lambda: {"parts": 0, "kg": 0.0, "by_city": defaultdict(float)})
+    for r in mat_rows:
+        city, mat, col, cnt, matg = r[0], r[1], r[2], r[3], r[4]
+        fn = fil_name(mat, col)
+        mat_agg[fn]["parts"] += cnt
+        mat_agg[fn]["kg"] += round(float(matg) / 1000.0, 3)
+        mat_agg[fn]["by_city"][city] += round(float(matg) / 1000.0, 3)
+
+    max_mat_kg = max([v["kg"] for v in mat_agg.values()] or [1])
+    materials_list = []
+    for fn, v in sorted(mat_agg.items(), key=lambda x: x[1]["kg"], reverse=True):
+        materials_list.append({
+            "name": fn, "parts": v["parts"], "kg": round(v["kg"], 2),
+            "pct_of_max": round((v["kg"] / max_mat_kg) * 100, 1) if max_mat_kg else 0,
+            "by_city": {c: round(v["by_city"].get(c, 0), 2) for c in CITIES},
+        })
+
+    db.close()
+
+    return render_template('analytics.html',
+        from_date=from_date, to_date=to_date, days_in_range=days_in_range, presets=presets,
+        total_jobs=total_jobs, completed=completed, cancelled=cancelled, failed=failed,
+        total_hours=total_hours, total_mat_kg=total_mat_kg, success_rate=success_rate,
+        avg_jobs_day=avg_jobs_day, avg_hours_day=avg_hours_day, avg_mat_day=avg_mat_day,
+        machines=machines, city_stats=city_stats, materials_list=materials_list,
+        city_color=CITY_COLOR, cities=CITIES)
+
 @app.route('/api/stock_add',methods=['POST'])
 def stock_add():
     try:
