@@ -1,15 +1,28 @@
 {% extends "base.html" %}
 {% set active = 'fails' %}
 {% block title %}Failures{% endblock %}
-
 {% block content %}
 <div class="page-header">
-  <div class="page-title">Failure Analysis</div>
-  <div class="page-meta">All failed &amp; cancelled prints</div>
+  <div>
+    <div class="page-title">Failure Analysis</div>
+    <div class="page-meta">All failed &amp; cancelled prints</div>
+  </div>
 </div>
 
-<!-- Top failing parts -->
-<div class="section-title">Top Failing Parts</div>
+<div class="cards-row cards-2" style="margin-bottom:22px">
+  <div class="gcard g-red">
+    <div class="card-label">Total Failures &amp; Cancellations</div>
+    <div class="card-value">{{ rows|length }}</div>
+    <div class="card-sub">across all cities, all time</div>
+  </div>
+  <div class="gcard g-amber">
+    <div class="card-label">Unique Parts Affected</div>
+    <div class="card-value">{{ top|length }}</div>
+    <div class="card-sub">distinct part names with at least one failure</div>
+  </div>
+</div>
+
+<div class="section-title">🔴 Top Failing Parts</div>
 <div class="table-card" style="margin-bottom:22px">
   <div class="table-card-header">
     Most Failed Parts (All Time)
@@ -41,7 +54,7 @@
   </table>
 </div>
 
-<!-- All failed prints -->
+<div class="section-title">📋 All Failures</div>
 <div class="table-card">
   <div class="table-card-header">
     All Failures
