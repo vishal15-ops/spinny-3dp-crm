@@ -156,10 +156,11 @@
     }
     .table-card-header small{font-size:11px;color:var(--text-light);font-weight:400}
     table{width:100%;border-collapse:collapse;font-size:13px}
-    thead th{padding:10.5px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-light);background:#fafbfc;border-bottom:1px solid var(--border)}
-    tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+    thead th{padding:10.5px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-light);background:linear-gradient(135deg,#fdf2f8,#f5f3ff);border-bottom:1px solid var(--border)}
+    tbody tr{border-bottom:1px solid var(--border);transition:background .12s;border-left:3px solid transparent}
+    tbody tr:nth-child(even){background:#fbfaff}
     tbody tr:last-child{border-bottom:none}
-    tbody tr:hover{background:#fafbfd}
+    tbody tr:hover{background:linear-gradient(90deg,#fdf2f8,#faf5ff);border-left-color:var(--pink)}
     tbody td{padding:10px 14px;color:var(--text-dark)}
     .td-part{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;letter-spacing:.01em}
