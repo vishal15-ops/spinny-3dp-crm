@@ -84,21 +84,22 @@
       <button type="submit">Apply</button>
       <div class="an-presets">
         <a href="/analytics?from={{ presets.today[0] }}&to={{ presets.today[1] }}">Today</a>
+        <a href="/analytics?from={{ presets.yesterday[0] }}&to={{ presets.yesterday[1] }}">Yesterday</a>
         <a href="/analytics?from={{ presets['7d'][0] }}&to={{ presets['7d'][1] }}">Last 7 Days</a>
         <a href="/analytics?from={{ presets['30d'][0] }}&to={{ presets['30d'][1] }}">Last 30 Days</a>
         <a href="/analytics?from={{ presets.this_month[0] }}&to={{ presets.this_month[1] }}">This Month</a>
         <a href="/analytics?from={{ presets.last_month[0] }}&to={{ presets.last_month[1] }}">Last Month</a>
       </div>
     </form>
-    <div class="an-range-label">Showing: {{ from_date }} → {{ to_date }} &nbsp;•&nbsp; {{ days_in_range }} day{{ 's' if days_in_range != 1 else '' }}</div>
+    <div class="an-range-label">Showing: {{ from_date }} → {{ to_date }} &nbsp;•&nbsp; {{ days_in_range }} day{{ 's' if days_in_range != 1 else '' }} selected &nbsp;•&nbsp; {{ active_days_overall }} active day{{ 's' if active_days_overall != 1 else '' }} (machine actually ran)</div>
   </div>
 
   <div class="an-kpi-grid">
-    <div class="an-kpi k1"><div class="an-kpi-icon">🖨️</div><div class="an-kpi-val">{{ total_jobs }}</div><div class="an-kpi-lbl">Total Jobs</div><div class="an-kpi-sub">avg {{ avg_jobs_day }}/day</div></div>
+    <div class="an-kpi k1"><div class="an-kpi-icon">🖨️</div><div class="an-kpi-val">{{ total_jobs }}</div><div class="an-kpi-lbl">Total Jobs</div><div class="an-kpi-sub">{{ avg_jobs_day }}/active day &nbsp;•&nbsp; {{ avg_jobs_per_hour }}/active hr</div></div>
     <div class="an-kpi k2"><div class="an-kpi-icon">✅</div><div class="an-kpi-val">{{ completed }}</div><div class="an-kpi-lbl">Success</div><div class="an-kpi-sub">{{ success_rate }}% success rate</div></div>
     <div class="an-kpi k3"><div class="an-kpi-icon">✖</div><div class="an-kpi-val">{{ cancelled }}</div><div class="an-kpi-lbl">Cancelled</div><div class="an-kpi-sub">{{ failed }} failed</div></div>
-    <div class="an-kpi k4"><div class="an-kpi-icon">⏱️</div><div class="an-kpi-val">{{ total_hours }}h</div><div class="an-kpi-lbl">Machine Hours</div><div class="an-kpi-sub">avg {{ avg_hours_day }}h/day</div></div>
-    <div class="an-kpi k5"><div class="an-kpi-icon">🧵</div><div class="an-kpi-val">{{ total_mat_kg }}kg</div><div class="an-kpi-lbl">Material Used</div><div class="an-kpi-sub">avg {{ avg_mat_day }}kg/day</div></div>
+    <div class="an-kpi k4"><div class="an-kpi-icon">⏱️</div><div class="an-kpi-val">{{ total_hours }}h</div><div class="an-kpi-lbl">Machine Hours</div><div class="an-kpi-sub">avg {{ avg_hours_day }}h/active day</div></div>
+    <div class="an-kpi k5"><div class="an-kpi-icon">🧵</div><div class="an-kpi-val">{{ total_mat_kg }}kg</div><div class="an-kpi-lbl">Material Used</div><div class="an-kpi-sub">{{ avg_mat_day }}kg/active day &nbsp;•&nbsp; {{ avg_mat_g_per_hour }}g/active hr</div></div>
     <div class="an-kpi k6"><div class="an-kpi-icon">🏙️</div><div class="an-kpi-val">{{ city_stats|length }}</div><div class="an-kpi-lbl">Active Cities</div><div class="an-kpi-sub">out of {{ cities|length }} total</div></div>
   </div>
 
@@ -115,7 +116,9 @@
         <div class="an-city-stat-row"><span>Success Rate</span><b>{{ c.success_rate }}%</b></div>
         <div class="an-city-stat-row"><span>Hours</span><b>{{ c.hours }}h</b></div>
         <div class="an-city-stat-row"><span>Material</span><b>{{ c.material_kg }}kg</b></div>
-        <div class="an-city-stat-row"><span>Avg Hours/Day</span><b>{{ c.avg_hours_day }}h</b></div>
+        <div class="an-city-stat-row"><span>Avg Hours/Active Day</span><b>{{ c.avg_hours_day }}h</b></div>
+        <div class="an-city-stat-row"><span>Active Days</span><b>{{ c.active_days }}</b></div>
+        <div class="an-city-stat-row"><span>Material/Active Hour</span><b>{{ c.mat_g_per_hour }}g/h</b></div>
       </div>
       {% endfor %}
     </div>
@@ -130,7 +133,7 @@
     <table class="an-table">
       <thead><tr>
         <th>Printer</th><th>City</th><th>Total</th><th>✅ Success</th><th>✖ Cancelled</th>
-        <th>Failed</th><th>Success Rate</th><th>Hours</th><th>Avg Hrs/Day</th>
+        <th>Failed</th><th>Success Rate</th><th>Hours</th><th>Active Days</th><th>Avg Hrs/Active Day</th><th>Material/Active Hr</th>
       </tr></thead>
       <tbody>
         {% for m in machines %}
@@ -148,7 +151,9 @@
             </div>
           </td>
           <td>{{ m.hours }}h</td>
+          <td style="text-align:center">{{ m.active_days }}</td>
           <td>{{ m.avg_hours_day }}h</td>
+          <td>{{ m.mat_g_per_hour }}g/h</td>
         </tr>
         {% endfor %}
       </tbody>
