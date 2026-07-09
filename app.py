@@ -274,6 +274,11 @@ def compute_record(t, acc):
         status="Completed"
     if status=="Queued" and et:
         status="Completed"
+    # BAMBU BUG FIX: print start hote hi cancel hua par Bambu ne "Completed" + full
+    # planned weight bhej diya (e.g. 691g in 4 min = impossible). Agar wall time
+    # slicer estimate ke 10% se bhi kam hai (ya 3 min se kam), toh ye fake success hai.
+    if status=="Completed" and d_cost>0 and 0<=d_wall<max(3, int(d_cost*0.1)):
+        status="Cancelled"
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
     if st_ist and dur>0 and status!="In Process":
         et_ist=st_ist+timedelta(minutes=dur)
@@ -1177,6 +1182,25 @@ def api_daily_success():
             "printer": r["printer"], "end_time": r["end_t"]
         })
     return jsonify(out)
+
+@app.route('/api/debug_raw')
+def debug_raw():
+    """Bambu ka RAW task JSON — bina kisi processing ke. ?city=Delhi&q=part name"""
+    city = request.args.get("city", "Delhi")
+    q = request.args.get("q", "").lower()
+    acc = next((a for a in ACCOUNTS if a["city_override"] == city), None)
+    if not acc:
+        acc = next((a for a in ACCOUNTS if a["city_override"] is None), None)
+    if not acc: return jsonify({"error":"no account for city"}),400
+    tasks = fetch_tasks(acc["token"])
+    out = []
+    for t in tasks:
+        if q and q not in str(t.get("title", "")).lower():
+            continue
+        out.append(t)
+        if len(out) >= 5:
+            break
+    return jsonify({"count": len(out), "raw_tasks": out})
 
 @app.route('/api/health')
 def health():
