@@ -974,16 +974,23 @@ def wastage_page():
 
 def _date_presets():
     today = date.today()
+    yesterday = today - timedelta(days=1)
     this_month_start = today.replace(day=1)
     last_month_end = this_month_start - timedelta(days=1)
     last_month_start = last_month_end.replace(day=1)
     return {
         "today":      (today, today),
+        "yesterday":  (yesterday, yesterday),
         "7d":         (today - timedelta(days=6), today),
         "30d":        (today - timedelta(days=29), today),
         "this_month": (this_month_start, today),
         "last_month": (last_month_start, last_month_end),
     }
+
+# A day counts as "active" for averaging purposes only if the machine actually
+# spent time running that day (duration_min>0) — idle/off days are excluded,
+# so the average reflects real running performance, not diluted by off-days.
+ACTIVE_STATUS_SQL = "status IN ('Completed','In Process','Failed') AND duration_min>0"
 
 @app.route('/analytics')
 def analytics():
@@ -1017,9 +1024,34 @@ def analytics():
     except Exception:
         days_in_range = 1
 
-    avg_jobs_day  = round(total_jobs / days_in_range, 1)
-    avg_hours_day = round(total_hours / days_in_range, 1)
-    avg_mat_day   = round(total_mat_kg / days_in_range, 2)
+    # Overall active days = distinct dates where ANY machine actually ran (all cities combined)
+    active_days_overall = db.execute(f"""SELECT COUNT(DISTINCT date) FROM prints
+        WHERE date>=? AND date<=? AND {ACTIVE_STATUS_SQL}""", (from_date, to_date)).fetchone()[0] or 0
+
+    # ACTIVE-DAY averages only — every average below is total ÷ days the machine
+    # actually ran (duration_min>0), NOT calendar days. Idle/off days are excluded
+    # so this reflects the true running rate, not diluted by days nothing happened.
+    avg_jobs_day  = round(total_jobs / active_days_overall, 1) if active_days_overall else 0
+    avg_hours_day = round(total_hours / active_days_overall, 2) if active_days_overall else 0
+    avg_mat_day   = round(total_mat_kg / active_days_overall, 2) if active_days_overall else 0
+
+    # PER ACTIVE-HOUR averages — total ÷ actual running hours (total_hours already
+    # excludes idle time). Tells you throughput/burn-rate while the machine is running:
+    # jobs finished per running hour, and material (g) consumed per running hour.
+    avg_jobs_per_hour = round(total_jobs / total_hours, 2) if total_hours else 0
+    avg_mat_g_per_hour = round((total_mat_kg * 1000) / total_hours, 1) if total_hours else 0
+
+    # Active-days per printer and per city — used to compute a TRUE running average
+    # (total hours / days it actually ran), instead of diluting by calendar/off days.
+    machine_active_rows = db.execute(f"""SELECT printer, city, COUNT(DISTINCT date) FROM prints
+        WHERE date>=? AND date<=? AND {ACTIVE_STATUS_SQL}
+        GROUP BY printer, city""", (from_date, to_date)).fetchall()
+    machine_active_map = {(r[0] or "Unknown", r[1] or "Unknown"): r[2] for r in machine_active_rows}
+
+    city_active_rows = db.execute(f"""SELECT city, COUNT(DISTINCT date) FROM prints
+        WHERE date>=? AND date<=? AND {ACTIVE_STATUS_SQL}
+        GROUP BY city""", (from_date, to_date)).fetchall()
+    city_active_map = {r[0]: r[1] for r in city_active_rows}
 
     machine_rows = db.execute(f"""SELECT printer, city, COUNT(*),
         COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
@@ -1035,11 +1067,14 @@ def analytics():
         hrs  = round(float(r[6] or 0), 1)
         matg = round(float(r[7] or 0), 1)
         sr = round((comp / tot * 100), 1) if tot else 0
+        active_days = machine_active_map.get((r[0] or "Unknown", r[1] or "Unknown"), 0)
         machines.append({
             "printer": r[0] or "Unknown", "city": r[1] or "Unknown",
             "total": tot, "completed": comp, "cancelled": canc, "failed": fail,
             "hours": hrs, "material_g": matg, "success_rate": sr,
-            "avg_hours_day": round(hrs / days_in_range, 2),
+            "active_days": active_days,
+            "avg_hours_day": round(hrs / active_days, 2) if active_days else 0,
+            "mat_g_per_hour": round(matg / hrs, 1) if hrs else 0,
         })
 
     city_rows = db.execute(f"""SELECT city, COUNT(*),
@@ -1056,12 +1091,15 @@ def analytics():
         hrs   = round(float(r[5] or 0), 1)
         matkg = round(float(r[6] or 0), 2)
         sr = round((comp / tot * 100), 1) if tot else 0
+        active_days = city_active_map.get(r[0], 0)
         city_stats.append({
             "city": r[0] or "Unknown", "total": tot, "completed": comp,
             "cancelled": canc, "failed": fail, "hours": hrs,
             "material_kg": matkg, "success_rate": sr,
             "color": CITY_COLOR.get(r[0], "#999"),
-            "avg_hours_day": round(hrs / days_in_range, 2),
+            "active_days": active_days,
+            "avg_hours_day": round(hrs / active_days, 2) if active_days else 0,
+            "mat_g_per_hour": round((matkg * 1000) / hrs, 1) if hrs else 0,
         })
 
     mat_rows = db.execute("""SELECT city, material, filament_color, COUNT(*),
@@ -1089,10 +1127,12 @@ def analytics():
     db.close()
 
     return render_template('analytics.html',
-        from_date=from_date, to_date=to_date, days_in_range=days_in_range, presets=presets,
+        from_date=from_date, to_date=to_date, days_in_range=days_in_range,
+        active_days_overall=active_days_overall, presets=presets,
         total_jobs=total_jobs, completed=completed, cancelled=cancelled, failed=failed,
         total_hours=total_hours, total_mat_kg=total_mat_kg, success_rate=success_rate,
         avg_jobs_day=avg_jobs_day, avg_hours_day=avg_hours_day, avg_mat_day=avg_mat_day,
+        avg_jobs_per_hour=avg_jobs_per_hour, avg_mat_g_per_hour=avg_mat_g_per_hour,
         machines=machines, city_stats=city_stats, materials_list=materials_list,
         city_color=CITY_COLOR, cities=CITIES)
 
