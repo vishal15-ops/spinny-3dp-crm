@@ -10,12 +10,7 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH  = os.path.join(BASE_DIR, 'spinny_3dp.db')
 
-# ABS avg flow used to estimate material burned on cancelled prints (g/min)
 CANCEL_FLOW_G_PER_MIN = 0.4
-# No real FDM print (even a big multi-plate automotive part) consumes material
-# faster than this — actual Spinny print history averages ~0.2-0.6 g/min.
-# Used as a sanity check: if reported weight implies a faster rate than this,
-# the weight/duration/status combo is bogus (Bambu glitch), not a real number.
 MAX_PLAUSIBLE_G_PER_MIN = 5.0
 
 ACCOUNTS = [
@@ -37,6 +32,37 @@ STOCK_SHEET_URL = os.environ.get("STOCK_SHEET_URL","")
 
 _sheets = {"orders":[],"designs":[],"pendency":[],"fetched_at":0}
 SHEETS_TTL = 1800
+
+# ============================================================
+# MACHINE NAME NORMALIZATION
+# ============================================================
+# "3DP Remarks" column mein machine names loosely likhe jaate hain
+# (e.g. "P1S DELHI", "P1S", "X1-CARBON", "X1 Carbon"). Bambu printer
+# ki "printer" field mein bhi apna naam hota hai (e.g. "3DP-01P-673",
+# "Spinny-01"). In dono ko match karne ke liye ek normalize function
+# + mapping table use karte hain. Naye printer/city milte hi is
+# mapping mein add karte jao.
+# ============================================================
+def normalize_machine(raw):
+    s = str(raw or "").strip().upper()
+    s = re.sub(r'\s+', ' ', s)
+    if not s: return ""
+    if "P1S" in s: return "P1S"
+    if "X1" in s: return "X1 CARBON"
+    return s
+
+# Bambu "printer" field -> normalized machine key (extend as needed)
+PRINTER_TO_MACHINE = {
+    "3DP-01P-673": "P1S",
+    "Spinny-01": "X1 CARBON",
+    "Spinny-02": "P1S",
+}
+
+def machine_of_printer(printer_name):
+    key = str(printer_name or "").strip()
+    if key in PRINTER_TO_MACHINE:
+        return PRINTER_TO_MACHINE[key]
+    return normalize_machine(key)
 
 def fetch_sheets(force=False):
     global _sheets
@@ -88,7 +114,8 @@ def init_db():
                 "ALTER TABLE prints ADD COLUMN filament_color TEXT DEFAULT ''",
                 "ALTER TABLE prints ADD COLUMN cost_time INTEGER DEFAULT 0",
                 "ALTER TABLE stock_items ADD COLUMN reorder_level REAL DEFAULT 0",
-                "ALTER TABLE stock_txn ADD COLUMN txn_time TEXT DEFAULT ''"]:
+                "ALTER TABLE stock_txn ADD COLUMN txn_time TEXT DEFAULT ''",
+                "ALTER TABLE stock_txn ADD COLUMN machine TEXT DEFAULT ''"]:  # <-- NAYA COLUMN
         try: db.execute(col)
         except: pass
     STOCK_SEED=[("eSUN ABS+ Filament 1.75mm Black","Kgs"),
@@ -207,8 +234,8 @@ def restore_from_github():
                 except: pass
             for t in d.get("stock_txn",[]):
                 try:
-                    db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at,txn_time) VALUES (?,?,?,?,?,?,?,?,?)",
-                        (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at",""),t.get("txn_time","")))
+                    db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at,txn_time,machine) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                        (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at",""),t.get("txn_time",""),t.get("machine","")))
                 except: pass
         db.commit(); db.close()
         global _sheets
@@ -235,7 +262,6 @@ def parse_dt(v):
     except: return None
 
 def parse_txn_time(v):
-    """Parse '16:50', '16:50:00', '4:50 PM', '10:00 AM' -> 'HH:MM' (24h). Empty if unparseable."""
     s=str(v or "").strip()
     if not s: return ""
     m=re.match(r'^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM|am|pm)?$', s)
@@ -280,25 +306,10 @@ def compute_record(t, acc):
     if status=="Queued" and et:
         status="Completed"
     weight_g = float(t.get("weight") or 0)
-    # BAMBU BUG FIX: print start hote hi cancel hua par Bambu ne "Completed" + full
-    # planned weight bhej diya (e.g. 691g in 4 min = impossible). Agar wall time
-    # slicer estimate ke 10% se bhi kam hai (ya 3 min se kam), toh ye fake success hai.
     if status=="Completed" and d_cost>0 and 0<=d_wall<max(3, int(d_cost*0.1)):
         status="Cancelled"
-    # MATERIAL-RATE SANITY CHECK: even without a cost estimate to compare against,
-    # a reported weight that implies an impossible g/min rate for the actual wall
-    # time (e.g. 177g in 4 min = 44g/min) means the weight/status is bogus — it
-    # was really an early/partial print, not a genuine completion.
     if status=="Completed" and d_wall>0 and (weight_g/d_wall)>MAX_PLAUSIBLE_G_PER_MIN:
         status="Cancelled"
-    # WIFI-DROP FALSE-CANCEL FIX: designer's phone/app loses WiFi connection to the
-    # printer mid-print and Bambu marks the job "Cancelled" even though the printer
-    # kept running physically. A genuine manual cancel almost always happens within
-    # the first ~2 minutes; anything that ran longer than that before showing
-    # Cancelled is very likely just a lost-connection glitch, not a real cancel —
-    # so we recount it as Completed instead. BUT only if the reported weight is
-    # still a plausible rate for that duration — otherwise the weight itself is
-    # bogus (same Bambu glitch as above) and this must stay Cancelled.
     if status=="Cancelled" and d_wall>2 and (weight_g/d_wall)<=MAX_PLAUSIBLE_G_PER_MIN:
         status="Completed"
     st_ist=st.replace(tzinfo=timezone.utc).astimezone(IST) if st else None
@@ -375,13 +386,7 @@ def startup_fixes():
         db.execute("UPDATE prints SET city='Bangalore' WHERE city IN ('Unknown','Hyderabad') AND printer LIKE '%engaluru%'")
         db.execute("UPDATE prints SET duration_min=0 WHERE duration_min>1440")
         db.execute("UPDATE prints SET status='Cancelled' WHERE status='Failed'")
-        # WIFI-DROP FALSE-CANCEL FIX (retroactive): already-stored Cancelled prints
-        # that ran longer than 2 minutes AND have a plausible material rate are
-        # near-certainly lost-connection glitches, not real cancels.
         db.execute(f"UPDATE prints SET status='Completed' WHERE status='Cancelled' AND duration_min>2 AND (material_g*1.0/duration_min)<={MAX_PLAUSIBLE_G_PER_MIN}")
-        # MATERIAL-RATE SANITY FIX (retroactive): already-stored Completed prints
-        # whose weight implies an impossible g/min rate are bogus (Bambu glitch,
-        # not a real completion) — recount them as Cancelled.
         db.execute(f"UPDATE prints SET status='Cancelled' WHERE status='Completed' AND duration_min>0 AND (material_g*1.0/duration_min)>{MAX_PLAUSIBLE_G_PER_MIN}")
         db.commit()
         dedup_prints(db)
@@ -682,6 +687,12 @@ def _process_stock_rows(rows):
             continue
         direction = str(row.get("direction","")).strip().upper()
         entered_by = str(row.get("entered_by","")).strip()
+        # NAYA: machine field ("3DP Remarks" column se aata hai) — normalize
+        # karke store karte hain (P1S, X1 CARBON, etc.). Sirf ISSUE (OUT)
+        # entries ke liye meaningful hai — kis machine ke against material
+        # OUT kiya gaya.
+        machine_raw = str(row.get("machine","")).strip()
+        machine = normalize_machine(machine_raw)
         if direction=="IN":
             txn_type = "OPENING" if "opening" in entered_by.lower() else "PURCHASE"
         elif direction=="OUT":
@@ -690,8 +701,8 @@ def _process_stock_rows(rows):
             continue
         d = str(row.get("date","")).strip() or date.today().strftime("%Y-%m-%d")
         tt = parse_txn_time(row.get("time",""))
-        db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at,txn_time) VALUES (?,?,?,?,?,?,?,?)",
-            (d, city, item_id, txn_type, qty, f"From Sheet ({entered_by or 'manual'})", now_str, tt))
+        db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at,txn_time,machine) VALUES (?,?,?,?,?,?,?,?,?)",
+            (d, city, item_id, txn_type, qty, f"From Sheet ({entered_by or 'manual'})", now_str, tt, machine))
         db.execute("INSERT OR IGNORE INTO stock_sheet_log (source_id,synced_at) VALUES (?,?)",(sid,now_str))
         seen.add(sid)
         added += 1
@@ -751,7 +762,6 @@ def materials():
     months_list=sorted(months_set,reverse=True)[:6]
     sel_mo=request.args.get("mo",months_list[0] if months_list else "")
 
-    # Daily city-wise total (kg) for selected month
     draw=db.execute("""SELECT date,city,COALESCE(SUM(material_g),0)/1000.0
         FROM prints WHERE date!='' AND substr(date,1,7)=? AND status IN ('Completed','Failed')
         GROUP BY date,city""",(sel_mo,)).fetchall()
@@ -906,12 +916,16 @@ def stock_page():
         sign="−" if t["txn_type"]=="ISSUE" else "+"
         try: t_time=t["txn_time"] or ""
         except: t_time=""
+        # NAYA: machine badge bhi dikhado agar hai
+        try: t_machine=t["machine"] or ""
+        except: t_machine=""
+        machine_badge=f" <span style='background:#eef2ff;color:#4338ca;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700'>🖨 {_html.escape(t_machine)}</span>" if t_machine else ""
         date_cell=f"{t['date']}" + (f" <span style='color:#9ca3af;font-size:11px'>{t_time}</span>" if t_time else "")
         log_rows+=(f"<tr style='border-bottom:1px solid #f3f4f6'>"
             f"<td style='padding:8px 12px;white-space:nowrap;color:#6b7280'>{date_cell}</td>"
             f"<td style='padding:8px 10px'><span style='color:{CITY_COLOR.get(t['city'],'#6b7280')};font-weight:600'>{t['city']}</span></td>"
             f"<td style='padding:8px 10px'>{_html.escape(t['iname'])}</td>"
-            f"<td style='padding:8px 10px;color:{tc};font-weight:600;white-space:nowrap'>{lb}</td>"
+            f"<td style='padding:8px 10px'>{lb}{machine_badge}</td>"
             f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{tc}'>{sign}{_fmt_qty(t['qty'])} {t['iunit']}</td>"
             f"<td style='padding:8px 10px;color:#6b7280'>{_html.escape(t['note'] or '')}</td>"
             f"<td style='padding:8px 10px;text-align:center'><button onclick='delTxn({t['id']})' style='background:none;border:none;cursor:pointer;color:#dc2626;font-size:14px' title='Delete entry'>🗑</button></td></tr>")
@@ -927,6 +941,15 @@ def stock_page():
         backup_last=_backup_state["last"],backup_on=bool(GH_TOKEN and GH_REPO))
 
 def compute_wastage():
+    """
+    Har Issue (OUT) entry ke against actual material use nikalta hai.
+    FIXED: Ab agar Issue entry mein machine tag hai (P1S / X1 CARBON),
+    to us Issue ke period mein sirf USI machine ke prints count hote
+    hain — dusri machine ka material is bucket mein mix nahi hota.
+    Agar Issue mein machine tag nahi hai (purani entries / manually
+    add ki gayi), to purana city-wide behavior chalta hai (fallback),
+    taaki purana data crash na ho.
+    """
     db=get_db()
     now_dt=datetime.now(IST).strftime("%Y-%m-%d %H:%M")
     items=db.execute("SELECT * FROM stock_items WHERE unit='Kgs' AND active=1").fetchall()
@@ -935,43 +958,70 @@ def compute_wastage():
         cat=ITEM_TO_CATEGORY.get(it["name"])
         if not cat: continue
         for c in CITIES:
-            issues=db.execute("SELECT date,qty,COALESCE(txn_time,'') AS tt FROM stock_txn WHERE city=? AND item_id=? AND txn_type='ISSUE' ORDER BY date ASC, tt ASC, id ASC",(c,it["id"])).fetchall()
-            points=[]
+            issues=db.execute("""SELECT date,qty,COALESCE(txn_time,'') AS tt, COALESCE(machine,'') AS mc
+                FROM stock_txn WHERE city=? AND item_id=? AND txn_type='ISSUE'
+                ORDER BY date ASC, tt ASC, id ASC""",(c,it["id"])).fetchall()
+
+            # Issue entries ko machine ke hisab se alag-alag timeline mein bant do.
+            # Jinke paas machine tag nahi hai unko "" (city-wide/unknown) bucket mein.
+            by_bucket = defaultdict(list)
             for row in issues:
                 t=(row["tt"] or "").strip() or "00:00"
                 dt=f"{row['date']} {t}"
                 q=float(row["qty"] or 0)
-                if points and points[-1][0]==dt:
-                    points[-1][1]+=q
+                mc = row["mc"] or ""
+                bucket = by_bucket[mc]
+                if bucket and bucket[-1][0]==dt:
+                    bucket[-1][1]+=q
                 else:
-                    points.append([dt,q])
-            for i,(start_dt,qv) in enumerate(points):
-                is_last=(i+1==len(points))
-                end_dt = points[i+1][0] if not is_last else "9999-12-31 23:59"
-                period_end_display = points[i+1][0] if not is_last else now_dt
-                prints=db.execute("SELECT material,filament_color,material_g,status,duration_min FROM prints WHERE city=? AND start_time>=? AND start_time<? AND status IN ('Completed','Failed','Cancelled')",(c,start_dt,end_dt)).fetchall()
-                actual_g=0.0
-                for p in prints:
-                    if fil_name(p["material"],p["filament_color"])!=cat: continue
-                    if p["status"]=="Cancelled":
-                        # Bambu reports full planned weight on cancel; estimate real burn from run time
-                        actual_g += round(float(p["duration_min"] or 0)*CANCEL_FLOW_G_PER_MIN,1)
+                    bucket.append([dt,q])
+
+            for mc, points in by_bucket.items():
+                for i,(start_dt,qv) in enumerate(points):
+                    is_last=(i+1==len(points))
+                    end_dt = points[i+1][0] if not is_last else "9999-12-31 23:59"
+                    period_end_display = points[i+1][0] if not is_last else now_dt
+
+                    if mc:
+                        # Machine-specific Issue — sirf usi machine ke prints match karo
+                        prints=db.execute("""SELECT material,filament_color,material_g,status,duration_min,printer
+                            FROM prints WHERE city=? AND start_time>=? AND start_time<?
+                            AND status IN ('Completed','Failed','Cancelled')""",(c,start_dt,end_dt)).fetchall()
+                        prints = [p for p in prints if machine_of_printer(p["printer"])==mc]
                     else:
-                        actual_g += float(p["material_g"] or 0)
-                issued_g=qv*1000
-                diff_g=issued_g-actual_g
-                pct=(diff_g/issued_g*100) if issued_g>0 else 0
-                out.append({"city":c,"material":it["name"],"date":start_dt,"period_end":period_end_display,
-                    "issued_g":round(issued_g,1),"actual_g":round(actual_g,1),
-                    "diff_g":round(diff_g,1),"pct":round(pct,1),
-                    "status":"ongoing" if is_last else "closed"})
+                        # Machine tag nahi hai (purani entry) — sabhi machines count (purana behavior)
+                        prints=db.execute("""SELECT material,filament_color,material_g,status,duration_min,printer
+                            FROM prints WHERE city=? AND start_time>=? AND start_time<?
+                            AND status IN ('Completed','Failed','Cancelled')""",(c,start_dt,end_dt)).fetchall()
+
+                    actual_g=0.0
+                    by_machine=defaultdict(float)
+                    for p in prints:
+                        if fil_name(p["material"],p["filament_color"])!=cat: continue
+                        pm = machine_of_printer(p["printer"])
+                        if p["status"]=="Cancelled":
+                            g = round(float(p["duration_min"] or 0)*CANCEL_FLOW_G_PER_MIN,1)
+                        else:
+                            g = float(p["material_g"] or 0)
+                        actual_g += g
+                        by_machine[pm] += g
+
+                    issued_g=qv*1000
+                    diff_g=issued_g-actual_g
+                    pct=(diff_g/issued_g*100) if issued_g>0 else 0
+                    out.append({"city":c,"material":it["name"],"machine":mc or "All machines (no tag)",
+                        "date":start_dt,"period_end":period_end_display,
+                        "issued_g":round(issued_g,1),"actual_g":round(actual_g,1),
+                        "diff_g":round(diff_g,1),"pct":round(pct,1),
+                        "status":"ongoing" if is_last else "closed",
+                        "by_machine":{k:round(v,1) for k,v in by_machine.items()}})
     db.close()
     out.sort(key=lambda x:x["date"],reverse=True)
     return out
 
 def build_wastage_html(rows):
     if not rows:
-        return "<tr><td colspan='8' style='padding:24px;text-align:center;color:#9ca3af'>No Issue entries found yet — add an Issue entry on the Daily Materials page first, then wastage will be calculated</td></tr>"
+        return "<tr><td colspan='9' style='padding:24px;text-align:center;color:#9ca3af'>No Issue entries found yet — add an Issue entry on the Daily Materials page first, then wastage will be calculated</td></tr>"
     html=""
     for r in rows:
         row_bg=""
@@ -988,21 +1038,28 @@ def build_wastage_html(rows):
             elif r["pct"]<=25: col="#d97706"
             else: col="#dc2626"; row_bg="background:#fef2f2;"
         flag = "<div style='font-size:10px;color:#7c3aed;font-weight:700;margin-top:2px'>⚠ Issue entry likely missing</div>" if r["pct"]<0 else ""
+
+        by_machine = r.get("by_machine", {})
+        machine_html = ""
+        if len(by_machine) > 1:
+            parts = ", ".join(f"{_html.escape(m)}: {g}g" for m, g in sorted(by_machine.items(), key=lambda x:-x[1]))
+            machine_html = f"<div style='font-size:10px;color:#6b7280;margin-top:3px'>🖨 {parts}</div>"
+
+        machine_col = f"<span style='background:#eef2ff;color:#4338ca;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:700'>{_html.escape(r['machine'])}</span>"
+
         html+=(f"<tr style='border-bottom:1px solid #f3f4f6;{row_bg}'>"
             f"<td style='padding:8px 12px;white-space:nowrap;color:#6b7280;font-size:12px'>{r['date']} → {r['period_end']}</td>"
             f"<td style='padding:8px 10px'>{status_badge}</td>"
             f"<td style='padding:8px 10px'><span style='color:{CITY_COLOR.get(r['city'],'#6b7280')};font-weight:600'>{r['city']}</span></td>"
+            f"<td style='padding:8px 10px'>{machine_col}</td>"
             f"<td style='padding:8px 10px'>{_html.escape(r['material'])}</td>"
             f"<td style='padding:8px 10px;text-align:center'>{r['issued_g']}g</td>"
-            f"<td style='padding:8px 10px;text-align:center'>{r['actual_g']}g</td>"
+            f"<td style='padding:8px 10px;text-align:center'>{r['actual_g']}g{machine_html}</td>"
             f"<td style='padding:8px 10px;text-align:center;font-weight:600;color:{col}'>{label}: {r['diff_g']}g{flag}</td>"
             f"<td style='padding:8px 10px;text-align:center;font-weight:700;color:{col}'>{r['pct']}%</td></tr>")
     return html
 
 def build_alert_html(rows):
-    """Prominent banner for spools where actual usage exceeds what was issued —
-    almost always means an Issue entry is missing/incomplete in Daily Materials,
-    not a real over-use. Only shown when such rows exist."""
     problems = [r for r in rows if r["pct"] < 0]
     if not problems:
         return ""
@@ -1010,7 +1067,7 @@ def build_alert_html(rows):
     for r in problems:
         shortfall = abs(r["diff_g"])
         items += (f"<li style='margin-bottom:6px'>"
-            f"<b style='color:{CITY_COLOR.get(r['city'],'#6b7280')}'>{r['city']}</b> — {_html.escape(r['material'])} "
+            f"<b style='color:{CITY_COLOR.get(r['city'],'#6b7280')}'>{r['city']}</b> ({r['machine']}) — {_html.escape(r['material'])} "
             f"({r['date']} → {r['period_end']}): used <b>{r['actual_g']}g</b> but only <b>{r['issued_g']}g</b> was issued "
             f"— <b style='color:#7c3aed'>~{shortfall:.0f}g not logged</b>. Add a missing Issue entry on Daily Materials to fix.</li>")
     return (f"<div style='background:linear-gradient(135deg,#fef2f2,#fee2e2);border:1.5px solid #fca5a5;"
@@ -1041,9 +1098,6 @@ def _date_presets():
         "last_month": (last_month_start, last_month_end),
     }
 
-# A day counts as "active" for averaging purposes only if the machine actually
-# spent time running that day (duration_min>0) — idle/off days are excluded,
-# so the average reflects real running performance, not diluted by off-days.
 ACTIVE_STATUS_SQL = "status IN ('Completed','In Process','Failed') AND duration_min>0"
 
 @app.route('/analytics')
@@ -1078,25 +1132,16 @@ def analytics():
     except Exception:
         days_in_range = 1
 
-    # Overall active days = distinct dates where ANY machine actually ran (all cities combined)
     active_days_overall = db.execute(f"""SELECT COUNT(DISTINCT date) FROM prints
         WHERE date>=? AND date<=? AND {ACTIVE_STATUS_SQL}""", (from_date, to_date)).fetchone()[0] or 0
 
-    # ACTIVE-DAY averages only — every average below is total ÷ days the machine
-    # actually ran (duration_min>0), NOT calendar days. Idle/off days are excluded
-    # so this reflects the true running rate, not diluted by days nothing happened.
     avg_jobs_day  = round(total_jobs / active_days_overall, 1) if active_days_overall else 0
     avg_hours_day = round(total_hours / active_days_overall, 2) if active_days_overall else 0
     avg_mat_day   = round(total_mat_kg / active_days_overall, 2) if active_days_overall else 0
 
-    # PER ACTIVE-HOUR averages — total ÷ actual running hours (total_hours already
-    # excludes idle time). Tells you throughput/burn-rate while the machine is running:
-    # jobs finished per running hour, and material (g) consumed per running hour.
     avg_jobs_per_hour = round(total_jobs / total_hours, 2) if total_hours else 0
     avg_mat_g_per_hour = round((total_mat_kg * 1000) / total_hours, 1) if total_hours else 0
 
-    # Active-days per printer and per city — used to compute a TRUE running average
-    # (total hours / days it actually ran), instead of diluting by calendar/off days.
     machine_active_rows = db.execute(f"""SELECT printer, city, COUNT(DISTINCT date) FROM prints
         WHERE date>=? AND date<=? AND {ACTIVE_STATUS_SQL}
         GROUP BY printer, city""", (from_date, to_date)).fetchall()
@@ -1199,9 +1244,10 @@ def stock_add():
             return jsonify({"ok":False,"error":"invalid"}),400
         db=get_db()
         tt=parse_txn_time(p.get("time",""))
-        db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at,txn_time) VALUES (?,?,?,?,?,?,?,?)",
+        machine = normalize_machine(p.get("machine",""))
+        db.execute("INSERT INTO stock_txn (date,city,item_id,txn_type,qty,note,created_at,txn_time,machine) VALUES (?,?,?,?,?,?,?,?,?)",
             (p.get("date") or date.today().strftime("%Y-%m-%d"),p["city"],int(p["item_id"]),p["txn_type"],qty,
-             p.get("note","").strip(),datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),tt))
+             p.get("note","").strip(),datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"),tt,machine))
         db.commit(); db.close()
         backup_async()
         return jsonify({"ok":True})
@@ -1258,8 +1304,8 @@ def stock_import():
             db.execute("INSERT OR REPLACE INTO stock_items (id,name,unit,active,reorder_level) VALUES (?,?,?,?,?)",
                 (it["id"],it["name"],it.get("unit","Kgs"),it.get("active",1),it.get("reorder_level",0)))
         for t in p.get("txns",[]):
-            db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at,txn_time) VALUES (?,?,?,?,?,?,?,?,?)",
-                (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at",""),t.get("txn_time","")))
+            db.execute("INSERT INTO stock_txn (id,date,city,item_id,txn_type,qty,note,created_at,txn_time,machine) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (t["id"],t["date"],t["city"],t["item_id"],t["txn_type"],t["qty"],t.get("note",""),t.get("created_at",""),t.get("txn_time",""),t.get("machine","")))
         db.commit(); db.close()
         backup_async()
         return jsonify({"ok":True,"txns":len(p.get("txns",[]))})
@@ -1382,8 +1428,6 @@ def debug_bambu():
 
 @app.route('/api/daily_success')
 def api_daily_success():
-    """Aaj ke Completed prints city-wise — Google Sheet auto-pull ke liye.
-    Optional: ?date=YYYY-MM-DD kisi bhi din ka data nikalne ke liye."""
     day = request.args.get('date') or datetime.now(IST).strftime('%Y-%m-%d')
     db = get_db()
     rows = db.execute("""SELECT city, part_name, printer,
@@ -1403,7 +1447,6 @@ def api_daily_success():
 
 @app.route('/api/debug_raw')
 def debug_raw():
-    """Bambu ka RAW task JSON — bina kisi processing ke. ?city=Delhi&q=part name"""
     city = request.args.get("city", "Delhi")
     q = request.args.get("q", "").lower()
     acc = next((a for a in ACCOUNTS if a["city_override"] == city), None)
