@@ -376,6 +376,39 @@ def dedup_prints(db):
     db.commit()
     return len(to_del)
 
+def remove_restart_cancels(db):
+    """RESTART-CANCEL CLEANUP (all cities):
+    Agar kisi Cancelled print ke BAAD (24 hr ke andar) same city + same printer +
+    same part ka Completed print mil jata hai, toh wo cancel sirf ek restart tha —
+    real cancel nahi. Usse hata do.
+    Real cancel = cancel hua aur dobara print NAHI hua — wo record rakha jayega.
+    (e.g. Polo AC Vent 16:55 Cancelled 2m + 16:59 Done 9h59m -> cancel wali row delete)"""
+    rows=db.execute("""SELECT id,city,printer,TRIM(part_name),start_time,material_g
+        FROM prints WHERE status='Cancelled' AND start_time!='' AND LENGTH(start_time)>10""").fetchall()
+    dones=db.execute("""SELECT city,printer,TRIM(part_name),start_time,material_g
+        FROM prints WHERE status='Completed' AND start_time!='' AND LENGTH(start_time)>10""").fetchall()
+    done_map=defaultdict(list)
+    for d in dones:
+        done_map[(d[0],d[1],(d[2] or '').lower())].append((d[3],float(d[4] or 0)))
+    to_del=[]
+    for r in rows:
+        key=(r[1],r[2],(r[3] or '').lower())
+        try: cst=datetime.strptime(r[4],"%Y-%m-%d %H:%M")
+        except: continue
+        cg=float(r[5] or 0)
+        for dst_s,dg in done_map.get(key,[]):
+            try: dst=datetime.strptime(dst_s,"%Y-%m-%d %H:%M")
+            except: continue
+            gap=(dst-cst).total_seconds()
+            if 0<=gap<=86400:  # Done, cancel ke baad 24 hr ke andar
+                tol=max(1.0, cg*0.1)  # planned weight ~same (re-slice tolerance)
+                if cg==0 or abs(dg-cg)<=tol:
+                    to_del.append(r[0]); break
+    for i in to_del:
+        db.execute("DELETE FROM prints WHERE id=?",(i,))
+    db.commit()
+    return len(to_del)
+
 def startup_fixes():
     if not os.path.exists(DB_PATH): return
     db=sqlite3.connect(DB_PATH)
@@ -390,6 +423,7 @@ def startup_fixes():
         db.execute(f"UPDATE prints SET status='Cancelled' WHERE status='Completed' AND duration_min>0 AND (material_g*1.0/duration_min)>{MAX_PLAUSIBLE_G_PER_MIN}")
         db.commit()
         dedup_prints(db)
+        remove_restart_cancels(db)
     except Exception as e: print(f"[AUTO-FIX ERROR] {e}")
     finally: db.close()
 
