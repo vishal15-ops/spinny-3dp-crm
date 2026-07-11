@@ -1269,6 +1269,223 @@ def analytics():
         machines=machines, city_stats=city_stats, materials_list=materials_list,
         city_color=CITY_COLOR, cities=CITIES)
 
+# ============================================================
+# DEEP ANALYTICS — /deep
+# Click-through drill-down page: city card pe click karo to us
+# city ki POORI detail khul jati hai (day-wise, machine-wise,
+# top parts, materials, cancelled log, part search). Template
+# file ki zaroorat nahi — pura HTML yahi se render hota hai.
+# ============================================================
+DEEP_CSS = """
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:#f4f5f7;color:#111827;padding:24px}
+a{text-decoration:none;color:inherit}
+.wrap{max-width:1250px;margin:0 auto}
+h1{font-size:22px;margin-bottom:4px} .sub{color:#6b7280;font-size:13px;margin-bottom:18px}
+.bar{background:linear-gradient(135deg,#1e1b4b,#831843);border-radius:14px;padding:14px 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px}
+.bar input{padding:7px 10px;border-radius:8px;border:none;font-size:13px}
+.bar button,.chip{padding:7px 14px;border-radius:8px;border:none;background:#e91e63;color:#fff;font-weight:700;font-size:12.5px;cursor:pointer}
+.chip{background:rgba(255,255,255,.14)} .chip:hover{background:rgba(255,255,255,.28)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px}
+.kpi{border-radius:14px;padding:16px;color:#fff}
+.kpi .v{font-size:26px;font-weight:800} .kpi .l{font-size:11px;opacity:.9;text-transform:uppercase;letter-spacing:.04em;margin-top:2px} .kpi .s{font-size:11px;opacity:.85;margin-top:4px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:22px}
+.ccard{border-radius:14px;padding:16px;color:#fff;transition:transform .12s;display:block}
+.ccard:hover{transform:translateY(-3px);box-shadow:0 8px 20px rgba(0,0,0,.25)}
+.ccard h3{font-size:16px;margin-bottom:8px} .ccard .row{display:flex;justify-content:space-between;font-size:12.5px;padding:2.5px 0}
+.ccard .hint{margin-top:8px;font-size:11px;opacity:.85;font-weight:700}
+.sec{background:#fff;border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.sec h2{font-size:15px;margin-bottom:12px;color:#374151}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;padding:8px 10px;color:#6b7280;font-size:11px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;letter-spacing:.03em}
+td{padding:7px 10px;border-bottom:1px solid #f3f4f6}
+.g{color:#16a34a;font-weight:700}.r{color:#dc2626;font-weight:700}.mono{font-family:Consolas,monospace}
+.badge{padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700}
+.bd{background:#dcfce7;color:#166534}.bc{background:#fee2e2;color:#991b1b}
+.pill{display:inline-block;padding:2px 9px;border-radius:12px;font-size:11px;font-weight:700;color:#fff}
+.barbg{background:#f3f4f6;border-radius:6px;height:8px;overflow:hidden}.barfill{height:8px;border-radius:6px;background:linear-gradient(90deg,#e91e63,#9c27b0)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.search input{padding:8px 12px;border:1.5px solid #e5e7eb;border-radius:8px;width:280px;font-size:13px}
+.topnav{display:flex;gap:10px;margin-bottom:14px;font-size:12.5px;font-weight:700}
+.topnav a{background:#fff;padding:7px 14px;border-radius:8px;color:#374151;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.topnav a.on{background:#e91e63;color:#fff}
+</style>"""
+
+@app.route('/deep')
+def deep_analytics():
+    presets = {k: (v[0].strftime("%Y-%m-%d"), v[1].strftime("%Y-%m-%d")) for k, v in _date_presets().items()}
+    f = request.args.get('from','').strip(); t = request.args.get('to','').strip()
+    if not f or not t: f, t = presets["7d"]
+    city = request.args.get('city','').strip()
+    if city not in CITIES: city = ""
+    q = request.args.get('q','').strip()
+    db = get_db()
+
+    def qs(extra=""):
+        base = f"from={f}&to={t}"
+        if extra: base += "&" + extra
+        return base
+
+    where = "date>=? AND date<=?"; params = [f, t]
+    if city: where += " AND city=?"; params.append(city)
+
+    ov = db.execute(f"""SELECT COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        {HOURS_SQL}/60.0,{MAT_SQL}/1000.0
+        FROM prints WHERE {where}""", params).fetchone()
+    tot, ok, canc = ov[0] or 0, ov[1] or 0, ov[2] or 0
+    hrs = round(float(ov[3] or 0),1); mat = round(float(ov[4] or 0),2)
+    sr = round(ok/tot*100,1) if tot else 0
+
+    kpis = f"""<div class='kpis'>
+      <div class='kpi' style='background:linear-gradient(135deg,#2563eb,#1e40af)'><div class='v'>{tot}</div><div class='l'>Total Jobs</div></div>
+      <div class='kpi' style='background:linear-gradient(135deg,#16a34a,#15803d)'><div class='v'>{ok}</div><div class='l'>Success</div><div class='s'>{sr}% rate</div></div>
+      <div class='kpi' style='background:linear-gradient(135deg,#dc2626,#991b1b)'><div class='v'>{canc}</div><div class='l'>Cancelled</div></div>
+      <div class='kpi' style='background:linear-gradient(135deg,#db2777,#9d174d)'><div class='v'>{hrs}h</div><div class='l'>Machine Hours</div></div>
+      <div class='kpi' style='background:linear-gradient(135deg,#7c3aed,#5b21b6)'><div class='v'>{mat}kg</div><div class='l'>Material Used</div></div>
+    </div>"""
+
+    GRAD = {"Pune":"linear-gradient(135deg,#2196F3,#1565c0)","Bangalore":"linear-gradient(135deg,#9C27B0,#6a1b9a)",
+            "Hyderabad":"linear-gradient(135deg,#FF9800,#e65100)","Delhi":"linear-gradient(135deg,#43A047,#1b5e20)"}
+    cards = "<div class='cards'>"
+    for c in CITIES:
+        r = db.execute(f"""SELECT COUNT(*),
+            COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+            COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+            {HOURS_SQL}/60.0,{MAT_SQL}/1000.0
+            FROM prints WHERE date>=? AND date<=? AND city=?""",(f,t,c)).fetchone()
+        ct, cok, cca = r[0] or 0, r[1] or 0, r[2] or 0
+        ch = round(float(r[3] or 0),1); cm = round(float(r[4] or 0),2)
+        csr = round(cok/ct*100,1) if ct else 0
+        sel = "outline:3px solid #111827;" if c == city else ""
+        cards += (f"<a class='ccard' style='background:{GRAD[c]};{sel}' href='/deep?{qs('city='+c)}'>"
+            f"<h3>{c}</h3>"
+            f"<div class='row'><span>Jobs</span><b>{ct}</b></div>"
+            f"<div class='row'><span>✅ Success</span><b>{cok} ({csr}%)</b></div>"
+            f"<div class='row'><span>✖ Cancelled</span><b>{cca}</b></div>"
+            f"<div class='row'><span>Hours</span><b>{ch}h</b></div>"
+            f"<div class='row'><span>Material</span><b>{cm}kg</b></div>"
+            f"<div class='hint'>👆 Click for full details</div></a>")
+    cards += "</div>"
+
+    scope = city if city else "All Cities"
+
+    mrows = db.execute(f"""SELECT printer,device_model,city,COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        {HOURS_SQL}/60.0,{MAT_SQL}
+        FROM prints WHERE {where} GROUP BY printer,city ORDER BY 7 DESC""", params).fetchall()
+    mtab = ""
+    for r in mrows:
+        mt, mok, mca = r[3] or 0, r[4] or 0, r[5] or 0
+        mh = round(float(r[6] or 0),1); mg = round(float(r[7] or 0),1)
+        msr = round(mok/mt*100,1) if mt else 0
+        cc = CITY_COLOR.get(r[2],"#999")
+        mtab += (f"<tr><td><b>{_html.escape(r[0] or 'Unknown')}</b> <span style='color:#9ca3af;font-size:11px'>{_html.escape(r[1] or '')}</span></td>"
+            f"<td><span class='pill' style='background:{cc}'>{r[2]}</span></td>"
+            f"<td class='mono'>{mt}</td><td class='mono g'>{mok}</td><td class='mono r'>{mca}</td>"
+            f"<td class='mono'><b>{msr}%</b></td><td class='mono'>{mh}h</td><td class='mono'>{mg}g</td></tr>")
+
+    drows = db.execute(f"""SELECT date,COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(CASE WHEN status='Cancelled' THEN 1 ELSE 0 END),0),
+        {HOURS_SQL}/60.0,{MAT_SQL}
+        FROM prints WHERE {where} AND date!='' GROUP BY date ORDER BY date DESC""", params).fetchall()
+    dtab = ""
+    for r in drows:
+        dtab += (f"<tr><td class='mono'>{r[0]}</td><td class='mono'>{r[1]}</td>"
+            f"<td class='mono g'>{r[2]}</td><td class='mono r'>{r[3]}</td>"
+            f"<td class='mono'>{round(float(r[4] or 0),1)}h</td><td class='mono'>{round(float(r[5] or 0),1)}g</td></tr>")
+
+    prows = db.execute(f"""SELECT part_name,COUNT(*),
+        COALESCE(SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END),0),
+        COALESCE(SUM(material_g),0),COALESCE(AVG(CASE WHEN duration_min>0 THEN duration_min END),0)
+        FROM prints WHERE {where} GROUP BY TRIM(part_name) ORDER BY 2 DESC LIMIT 15""", params).fetchall()
+    maxp = max([r[1] for r in prows] or [1])
+    ptab = ""
+    for r in prows:
+        pn = _html.escape((r[0] or "")[:55])
+        pct = round(r[1]/maxp*100)
+        ptab += (f"<tr><td title='{_html.escape(r[0] or '')}'>{pn}</td>"
+            f"<td class='mono'><b>{r[1]}</b></td><td class='mono g'>{r[2]}</td>"
+            f"<td class='mono'>{round(float(r[3] or 0),1)}g</td><td class='mono'>{int(r[4] or 0)}m</td>"
+            f"<td style='width:120px'><div class='barbg'><div class='barfill' style='width:{pct}%'></div></div></td></tr>")
+
+    frows = db.execute(f"""SELECT material,filament_color,COUNT(*),COALESCE(SUM(material_g),0)
+        FROM prints WHERE {where} AND status IN ('Completed','Failed')
+        GROUP BY material,filament_color""", params).fetchall()
+    fagg = defaultdict(lambda: [0,0.0])
+    for r in frows:
+        fn = fil_name(r[0],r[1]); fagg[fn][0]+=r[2]; fagg[fn][1]+=float(r[3] or 0)
+    ftab = ""
+    for fn,v in sorted(fagg.items(), key=lambda x:-x[1][1]):
+        ftab += f"<tr><td>{_html.escape(fn)}</td><td class='mono'>{v[0]}</td><td class='mono'><b>{round(v[1]/1000,3)}kg</b></td></tr>"
+
+    crows = db.execute(f"""SELECT date,part_name,printer,duration_min,material_g
+        FROM prints WHERE {where} AND status='Cancelled'
+        ORDER BY date DESC,start_time DESC LIMIT 20""", params).fetchall()
+    ctab = ""
+    for r in crows:
+        ctab += (f"<tr><td class='mono'>{r[0]}</td><td>{_html.escape((r[1] or '')[:50])}</td>"
+            f"<td>{_html.escape(r[2] or '')}</td><td class='mono'>{r[3] or 0}m</td><td class='mono'>{round(float(r[4] or 0),1)}g</td></tr>")
+    if not ctab: ctab = "<tr><td colspan='5' style='text-align:center;color:#9ca3af;padding:16px'>Koi real cancel nahi is range me 🎉</td></tr>"
+
+    stab = ""
+    if q:
+        srows = db.execute(f"""SELECT date,part_name,printer,city,duration_min,material_g,status,substr(end_time,12,5)
+            FROM prints WHERE {where} AND part_name LIKE ?
+            ORDER BY date DESC,start_time DESC LIMIT 60""", params+['%'+q+'%']).fetchall()
+        for r in srows:
+            b = "<span class='badge bd'>✓ Done</span>" if r[6]=="Completed" else "<span class='badge bc'>⊘ Cancelled</span>"
+            cc = CITY_COLOR.get(r[3],"#999")
+            stab += (f"<tr><td class='mono'>{r[0]}</td><td>{_html.escape((r[1] or '')[:50])}</td>"
+                f"<td><span class='pill' style='background:{cc}'>{r[3]}</span></td>"
+                f"<td>{_html.escape(r[2] or '')}</td><td class='mono'>{r[4] or 0}m</td>"
+                f"<td class='mono'>{round(float(r[5] or 0),1)}g</td><td class='mono'>{r[7] or '-'}</td><td>{b}</td></tr>")
+        if not stab: stab = "<tr><td colspan='8' style='text-align:center;color:#9ca3af;padding:16px'>Koi part nahi mila</td></tr>"
+
+    db.close()
+
+    chips = "".join(f"<a class='chip' href='/deep?from={v[0]}&to={v[1]}{'&city='+city if city else ''}'>{lbl}</a>"
+        for k,lbl,v in [("today","Today",presets["today"]),("yesterday","Yesterday",presets["yesterday"]),
+                        ("7d","Last 7 Days",presets["7d"]),("30d","Last 30 Days",presets["30d"]),
+                        ("this_month","This Month",presets["this_month"]),("last_month","Last Month",presets["last_month"])])
+    clear_city = f"<a class='chip' href='/deep?{qs()}'>✕ Clear City Filter</a>" if city else ""
+
+    page = f"""<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Deep Analytics — Spinny 3DP</title>{DEEP_CSS}</head><body><div class='wrap'>
+<div class='topnav'><a href='/'>← Dashboard</a><a href='/analytics'>Analytics</a><a class='on' href='/deep'>🔎 Deep Analytics</a><a href='/wastage'>Wastage</a><a href='/stock'>Stock</a></div>
+<h1>🔎 Deep Analytics — {scope}</h1>
+<div class='sub'>{f} → {t} · Kisi bhi city card pe click karo puri detail ke liye</div>
+<div class='bar'>
+<form method='get' action='/deep' style='display:flex;gap:8px;align-items:center'>
+<input type='date' name='from' value='{f}'><input type='date' name='to' value='{t}'>
+{f"<input type='hidden' name='city' value='{city}'>" if city else ""}
+<button type='submit'>Apply</button></form>
+{chips}{clear_city}</div>
+{kpis}
+{cards}
+<div class='sec'><h2>🖨️ Machine-wise Performance — {scope}</h2><table><tr><th>Printer</th><th>City</th><th>Jobs</th><th>Success</th><th>Cancel</th><th>Rate</th><th>Hours</th><th>Material</th></tr>{mtab}</table></div>
+<div class='grid2'>
+<div class='sec'><h2>📅 Day-wise Trend — {scope}</h2><table><tr><th>Date</th><th>Jobs</th><th>Success</th><th>Cancel</th><th>Hours</th><th>Material</th></tr>{dtab}</table></div>
+<div class='sec'><h2>🧵 Material Breakdown — {scope}</h2><table><tr><th>Filament</th><th>Parts</th><th>Used</th></tr>{ftab}</table>
+<h2 style='margin-top:18px'>⊘ Real Cancels (latest 20)</h2><table><tr><th>Date</th><th>Part</th><th>Printer</th><th>Run</th><th>Mat</th></tr>{ctab}</table></div>
+</div>
+<div class='sec'><h2>🏆 Top 15 Parts — {scope}</h2><table><tr><th>Part Name</th><th>Prints</th><th>Success</th><th>Total Mat</th><th>Avg Time</th><th></th></tr>{ptab}</table></div>
+<div class='sec search'><h2>🔍 Part Search — {scope}</h2>
+<form method='get' action='/deep' style='display:flex;gap:8px;margin-bottom:12px'>
+<input type='hidden' name='from' value='{f}'><input type='hidden' name='to' value='{t}'>
+{f"<input type='hidden' name='city' value='{city}'>" if city else ""}
+<input type='text' name='q' value='{_html.escape(q)}' placeholder='Part ka naam likho... (e.g. cowl top)'>
+<button type='submit' style='padding:8px 16px;border-radius:8px;border:none;background:#e91e63;color:#fff;font-weight:700;cursor:pointer'>Search</button></form>
+{f"<table><tr><th>Date</th><th>Part</th><th>City</th><th>Printer</th><th>Run</th><th>Mat</th><th>Finish</th><th>Status</th></tr>{stab}</table>" if q else "<div style='color:#9ca3af;font-size:13px'>Kisi bhi part ka pura history dekhne ke liye upar naam type karo</div>"}
+</div>
+</div></body></html>"""
+    return page
+
 @app.route('/api/stock_add',methods=['POST'])
 def stock_add():
     try:
