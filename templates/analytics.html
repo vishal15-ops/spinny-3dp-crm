@@ -7,6 +7,10 @@
   .an-header{display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:14px;margin-bottom:20px}
   .an-title{font-size:23px;font-weight:800;margin:0 0 4px;color:#111827}
   .an-sub{color:#6b7280;font-size:13px}
+  .an-deep-btn{display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,#e91e63,#9d174d);
+    color:#fff;text-decoration:none;font-weight:800;font-size:13.5px;padding:11px 22px;border-radius:12px;
+    box-shadow:0 6px 18px rgba(233,30,99,.4);transition:.15s}
+  .an-deep-btn:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(233,30,99,.5)}
 
   .an-filterbar{background:linear-gradient(135deg,#1e1b4b 0%,#4c1d95 55%,#831843 100%);
     border-radius:16px;padding:18px 22px;margin-bottom:24px;box-shadow:0 8px 24px rgba(76,29,149,0.25)}
@@ -44,6 +48,8 @@
   table.an-table th{text-align:left;padding:10px 14px;background:#f9fafb;color:#6b7280;
     font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.02em;border-bottom:2px solid #e5e7eb}
   table.an-table td{padding:10px 14px;border-bottom:1px solid #f3f4f6}
+  tr.an-click-row{cursor:pointer;transition:.12s}
+  tr.an-click-row:hover{background:#fdf2f8}
   .an-city-badge{padding:3px 10px;border-radius:12px;color:#fff;font-size:11.5px;font-weight:700}
   .an-bar-bg{background:#f1f5f9;border-radius:6px;height:8px;width:100%;overflow:hidden}
   .an-bar-fill{height:100%;border-radius:6px}
@@ -52,17 +58,23 @@
   .an-num-amber{color:#d97706;font-weight:700}
 
   .an-city-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:20px}
-  .an-city-card{border-radius:14px;padding:18px;color:#fff;position:relative}
-  .an-city-card h3{margin:0 0 10px;font-size:16px;font-weight:800}
+  .an-city-card{border-radius:14px;padding:18px;color:#fff;position:relative;display:block;
+    text-decoration:none;transition:transform .14s,box-shadow .14s}
+  .an-city-card:hover{transform:translateY(-4px);box-shadow:0 12px 26px rgba(0,0,0,.3)}
+  .an-city-card h3{margin:0 0 10px;font-size:16px;font-weight:800;display:flex;justify-content:space-between;align-items:center}
+  .an-city-card h3 .an-go{font-size:12px;background:rgba(255,255,255,.2);padding:3px 10px;border-radius:12px;font-weight:700}
   .an-city-stat-row{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px;opacity:.95}
   .an-city-stat-row b{font-size:13.5px}
+  .an-city-hint{margin-top:10px;font-size:11px;font-weight:800;opacity:.9;text-align:center;
+    background:rgba(255,255,255,.14);border-radius:8px;padding:5px}
 
   .an-mat-row{padding:14px 20px;border-bottom:1px solid #f3f4f6}
   .an-mat-row:last-child{border-bottom:none}
   .an-mat-head{display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px}
   .an-mat-head b{font-weight:700;color:#111827}
   .an-mat-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-  .an-chip{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:#4b5563}
+  .an-chip{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:10px;background:#f3f4f6;color:#4b5563;text-decoration:none;transition:.12s}
+  a.an-chip:hover{filter:brightness(.92)}
 
   .an-empty{padding:30px;text-align:center;color:#9ca3af;font-size:13px}
 </style>
@@ -73,6 +85,7 @@
       <div class="an-title">📊 Analytics &amp; Utilization</div>
       <div class="an-sub">Machine performance, material consumption &amp; city breakdown for any date range</div>
     </div>
+    <a class="an-deep-btn" href="/deep?from={{ from_date }}&to={{ to_date }}">🔎 Deep Analytics — full drill-down</a>
   </div>
 
   <div class="an-filterbar">
@@ -103,13 +116,14 @@
     <div class="an-kpi k6"><div class="an-kpi-icon">🏙️</div><div class="an-kpi-val">{{ city_stats|length }}</div><div class="an-kpi-lbl">Active Cities</div><div class="an-kpi-sub">out of {{ cities|length }} total</div></div>
   </div>
 
-  <div class="an-section-title">🏙️ City-wise Breakdown</div>
+  <div class="an-section-title">🏙️ City-wise Breakdown <span style="font-weight:500;color:#9ca3af;font-size:12px">— card pe click karo full drill-down ke liye</span></div>
   <div class="an-card">
     {% if city_stats %}
     <div class="an-city-grid">
       {% for c in city_stats %}
-      <div class="an-city-card" style="background:linear-gradient(135deg,{{ c.color }},#111827)">
-        <h3>{{ c.city }}</h3>
+      <a class="an-city-card" style="background:linear-gradient(135deg,{{ c.color }},#111827)"
+         href="/deep?from={{ from_date }}&to={{ to_date }}&city={{ c.city }}">
+        <h3>{{ c.city }} <span class="an-go">Open →</span></h3>
         <div class="an-city-stat-row"><span>Total Jobs</span><b>{{ c.total }}</b></div>
         <div class="an-city-stat-row"><span>✅ Success</span><b>{{ c.completed }}</b></div>
         <div class="an-city-stat-row"><span>✖ Cancelled</span><b>{{ c.cancelled }}</b></div>
@@ -119,7 +133,8 @@
         <div class="an-city-stat-row"><span>Avg Hours/Active Day</span><b>{{ c.avg_hours_day }}h</b></div>
         <div class="an-city-stat-row"><span>Active Days</span><b>{{ c.active_days }}</b></div>
         <div class="an-city-stat-row"><span>Material/Active Hour</span><b>{{ c.mat_g_per_hour }}g/h</b></div>
-      </div>
+        <div class="an-city-hint">🔎 Day-wise trend · Top parts · Cancels · Search</div>
+      </a>
       {% endfor %}
     </div>
     {% else %}
@@ -127,7 +142,7 @@
     {% endif %}
   </div>
 
-  <div class="an-section-title">🖨️ Machine-wise Utilization (Success vs Cancelled)</div>
+  <div class="an-section-title">🖨️ Machine-wise Utilization (Success vs Cancelled) <span style="font-weight:500;color:#9ca3af;font-size:12px">— row pe click karo</span></div>
   <div class="an-card">
     {% if machines %}
     <table class="an-table">
@@ -137,7 +152,7 @@
       </tr></thead>
       <tbody>
         {% for m in machines %}
-        <tr>
+        <tr class="an-click-row" onclick="window.location='/deep?from={{ from_date }}&to={{ to_date }}&city={{ m.city }}'">
           <td style="font-weight:600">{{ m.printer }}</td>
           <td><span class="an-city-badge" style="background:{{ city_color.get(m.city,'#999') }}">{{ m.city }}</span></td>
           <td>{{ m.total }}</td>
@@ -178,7 +193,8 @@
         <div class="an-mat-chips">
           {% for c in cities %}
             {% if mat.by_city.get(c,0) > 0 %}
-            <span class="an-chip" style="background:{{ city_color.get(c,'#999') }}22;color:{{ city_color.get(c,'#999') }}">{{ c }}: {{ mat.by_city[c] }}kg</span>
+            <a class="an-chip" style="background:{{ city_color.get(c,'#999') }}22;color:{{ city_color.get(c,'#999') }}"
+               href="/deep?from={{ from_date }}&to={{ to_date }}&city={{ c }}">{{ c }}: {{ mat.by_city[c] }}kg</a>
             {% endif %}
           {% endfor %}
         </div>
