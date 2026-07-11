@@ -84,6 +84,11 @@
     .nav-link svg{opacity:.85;flex-shrink:0;transition:opacity .15s}
     .nav-link:hover svg,.nav-link.active svg{opacity:1}
     .city-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;box-shadow:0 0 7px currentColor}
+    .nav-link .nav-badge{
+      margin-left:auto;font-size:9px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;
+      background:linear-gradient(135deg,var(--pink),#7c3aed);color:#fff;padding:2px 6px;border-radius:6px;
+      box-shadow:0 0 8px var(--pink-glow);
+    }
     .sidebar-footer{margin-top:auto;padding:16px 16px 20px;border-top:1px solid rgba(255,255,255,.07)}
     .sync-btn{
       width:100%;padding:11px;background:linear-gradient(135deg,var(--pink),var(--pink-dark));
@@ -215,6 +220,9 @@
     </a>
     <a href="/analytics" class="nav-link {% if active=='analytics' %}active{% endif %}">
       <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 14l3-3 3 3 4-4"/></svg>Analytics
+    </a>
+    <a href="/deep" class="nav-link {% if active=='deep' %}active{% endif %}">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4a7 7 0 100 14 7 7 0 000-14z"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v3l2 2"/></svg>Deep Analytics<span class="nav-badge">New</span>
     </a>
   </div>
   <div class="nav-section">
