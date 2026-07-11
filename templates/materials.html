@@ -7,6 +7,13 @@
     <div class="page-title">🧵 Materials Usage</div>
     <div class="page-meta">Filament consumption by city and month</div>
   </div>
+  <a href="/deep" style="text-decoration:none">
+    <div style="padding:9px 18px;border-radius:9px;font-size:13px;font-weight:700;color:#fff;
+      background:linear-gradient(135deg,var(--pink),#7c3aed);box-shadow:0 3px 10px rgba(233,30,99,.3);
+      display:flex;align-items:center;gap:6px;cursor:pointer">
+      🔎 Deep Analytics
+    </div>
+  </a>
 </div>
 
 <!-- Month Tabs -->
@@ -27,7 +34,10 @@
 <!-- Monthly City-wise Breakdown -->
 {% set month_data = mdata.get(sel_mo, {}) %}
 <div class="table-card">
-  <div class="table-card-header">📅 {{ sel_mo }} — City-wise Filament Usage</div>
+  <div class="table-card-header">
+    📅 {{ sel_mo }} — City-wise Filament Usage
+    <small><a href="/deep?mo={{ sel_mo }}" style="color:var(--pink);font-weight:700;text-decoration:none">🔎 view deep breakdown →</a></small>
+  </div>
   {% if month_data %}
   <div style="overflow-x:auto;padding:0 0 4px">
     <table style="min-width:900px">
@@ -49,7 +59,11 @@
           {% set ct.kg = ct.kg + d.get('kg', 0) %}
         {% endfor %}
         <tr>
-          <td><span class="b-city" style="background:{{ city_color[city] }}">{{ city }}</span></td>
+          <td>
+            <a href="/deep?city={{ city }}&mo={{ sel_mo }}" style="text-decoration:none">
+              <span class="b-city" style="background:{{ city_color[city] }}">{{ city }}</span>
+            </a>
+          </td>
           {% for fn in filaments %}
           {% set d = city_data.get(fn, {}) %}
           {% set kg = d.get('kg', 0) %}
