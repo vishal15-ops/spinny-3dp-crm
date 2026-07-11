@@ -7,7 +7,16 @@
     <div class="page-title">Operations Dashboard</div>
     <div class="page-meta">Today: {{ today }} &nbsp;|&nbsp; Last sync: {{ last_sync[0] if last_sync else '—' }}</div>
   </div>
-  <div class="page-meta mono">{{ last_sync[1] if last_sync else 0 }} total records</div>
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="page-meta mono">{{ last_sync[1] if last_sync else 0 }} total records</div>
+    <a href="/deep" style="text-decoration:none">
+      <div style="padding:9px 18px;border-radius:9px;font-size:13px;font-weight:700;color:#fff;
+        background:linear-gradient(135deg,var(--pink),#7c3aed);box-shadow:0 3px 10px rgba(233,30,99,.3);
+        display:flex;align-items:center;gap:6px;cursor:pointer">
+        🔎 Deep Analytics
+      </div>
+    </a>
+  </div>
 </div>
 
 <div class="cards-row cards-4">
@@ -68,6 +77,9 @@
       <div><div style="font-size:10px;color:#dc2626">Cancelled</div><div style="font-size:16px;font-weight:800;color:#dc2626">{{ cities_today[city].cancelled }}</div></div>
       <div><div style="font-size:10px;color:#dc2626">Cancel Time</div><div style="font-size:14px;font-weight:700;color:#dc2626">{{ cities_today[city].cancel_hours }}h</div></div>
       <div style="grid-column:span 2"><div style="font-size:10px;color:#dc2626">Cancel Material</div><div style="font-size:14px;font-weight:700;color:#dc2626">{{ cities_today[city].cancel_mat_g }}g</div></div>
+    </div>
+    <div style="margin-top:10px;text-align:right">
+      <span style="font-size:11px;font-weight:700;color:var(--pink)">🔎 Deep view →</span>
     </div>
   </div>
   </a>
