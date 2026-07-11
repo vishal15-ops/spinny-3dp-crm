@@ -7,6 +7,13 @@
     <div class="page-title">Failure Analysis</div>
     <div class="page-meta">All failed &amp; cancelled prints</div>
   </div>
+  <a href="/deep" style="text-decoration:none">
+    <div style="padding:9px 18px;border-radius:9px;font-size:13px;font-weight:700;color:#fff;
+      background:linear-gradient(135deg,var(--pink),#7c3aed);box-shadow:0 3px 10px rgba(233,30,99,.3);
+      display:flex;align-items:center;gap:6px;cursor:pointer">
+      🔎 Deep Analytics
+    </div>
+  </a>
 </div>
 
 <div class="cards-row cards-2" style="margin-bottom:22px">
@@ -39,7 +46,7 @@
     </thead>
     <tbody>
       {% for r in top %}
-      <tr>
+      <tr onclick="window.location='/deep?city={{ r[2] }}&part={{ r[0]|urlencode }}'" style="cursor:pointer">
         <td class="mono" style="color:#9ca3af">{{ loop.index }}</td>
         <td>{{ r[0] }}</td>
         <td>
