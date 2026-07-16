@@ -6,8 +6,22 @@
   .clickrow{cursor:pointer;transition:background .12s}
   .clickrow:hover{background:#fdf2f8}
   .cpill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff}
-  .arrow{color:#e91e63;font-weight:700;font-size:12px}
   .hint{font-size:13.5px;color:var(--text-mid);margin:2px 0 12px;font-weight:500}
+  .rank-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+  .rank-card{
+    background:var(--card-bg);border-radius:var(--radius);padding:18px 19px;box-shadow:var(--shadow);
+    border:1px solid var(--border);position:relative;overflow:hidden;transition:box-shadow .2s ease,transform .2s ease;
+  }
+  .rank-card:hover{box-shadow:var(--shadow-md);transform:translateY(-2px)}
+  .rank-num{
+    position:absolute;top:-10px;right:2px;font-size:64px;font-weight:900;
+    color:rgba(233,30,99,.08);line-height:1;
+  }
+  .rank-part{font-size:14px;font-weight:700;color:var(--text-dark);line-height:1.3;margin-bottom:12px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:36px}
+  .rank-stats{display:flex;flex-wrap:wrap;gap:10px 18px}
+  .rank-stat-label{font-size:10px;color:var(--text-light);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .rank-stat-value{font-size:16px;font-weight:800;margin-top:2px}
 </style>
 
 <div class="page-header">
@@ -20,13 +34,26 @@
   </a>
 </div>
 
+<div class="cards-row cards-2">
+  <div class="gcard g-teal" style="background:linear-gradient(135deg,#0f766e,#0b4f4a);border-radius:var(--radius);padding:19px 21px;color:#fff;box-shadow:var(--shadow-md)">
+    <div class="card-label" style="color:rgba(255,255,255,.75)">Avg Part Cost — All Cities, All Time</div>
+    <div class="card-value" style="color:#fff">Rs {{ overall_avg_cost }}</div>
+    <div class="card-sub" style="color:rgba(255,255,255,.7)">Blended across every machine &amp; material</div>
+  </div>
+  <div class="gcard g-purple" style="background:linear-gradient(135deg,#7c3aed,#4c1d95);border-radius:var(--radius);padding:19px 21px;color:#fff;box-shadow:var(--shadow-md)">
+    <div class="card-label" style="color:rgba(255,255,255,.75)">Avg TAT — All Cities, All Time</div>
+    <div class="card-value" style="color:#fff">{{ overall_avg_tat }}</div>
+    <div class="card-sub" style="color:rgba(255,255,255,.7)">Avg time to make one part, completed prints only</div>
+  </div>
+</div>
+
 <div class="section-title">Machine Hours - Avg per Active Day</div>
 <div class="hint">Click any row -&gt; opens full detail for that city</div>
 <div class="table-card">
   <div class="table-card-header">City / Machine - average machine-hours per active day<small>Active day = a day the machine actually printed</small></div>
   <table>
     <thead><tr>
-      <th>City</th><th>Machine</th><th>Today</th><th>Yesterday</th><th>Last 7d</th><th>This Month</th><th>Last Month</th><th>All Time</th><th></th>
+      <th>City</th><th>Machine</th><th>Today</th><th>Yesterday</th><th>Last 7d</th><th>This Month</th><th>Last Month</th><th>All Time</th>
     </tr></thead>
     <tbody>
       {% for r in hours_rows %}
@@ -39,10 +66,9 @@
         <td class="mono">{{ r.month }}h</td>
         <td class="mono">{{ r.lm }}h</td>
         <td class="mono" style="font-weight:700">{{ r.alltime }}h</td>
-        <td class="arrow">view -&gt;</td>
       </tr>
       {% else %}
-      <tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
+      <tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -54,7 +80,7 @@
   <div class="table-card-header">Total parts, success, cancels &amp; success rate</div>
   <table>
     <thead><tr>
-      <th>City</th><th>Machine</th><th>Total Parts</th><th>Success</th><th>Cancelled</th><th>Success Rate</th><th>Avg Parts/Day</th><th></th>
+      <th>City</th><th>Machine</th><th>Total Parts</th><th>Success</th><th>Cancelled</th><th>Success Rate</th><th>Avg Parts/Day</th>
     </tr></thead>
     <tbody>
       {% for r in prod_rows %}
@@ -66,41 +92,30 @@
         <td class="mono" style="color:#dc2626;font-weight:700">{{ r.cancelled }}</td>
         <td class="mono"><b>{{ r.success_rate }}%</b></td>
         <td class="mono">{{ r.avg_parts }}</td>
-        <td class="arrow">view -&gt;</td>
       </tr>
       {% else %}
-      <tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
+      <tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
-<div class="section-title">Avg Part Cost - Today / Yesterday / Last 7d / This Month / Last Month / All Time</div>
-<div class="hint">Per City / Machine - blended avg cost across all materials, plus all-time avg turnaround time</div>
-<div class="table-card">
-  <div class="table-card-header">Average part cost per machine<small>Avg TAT = avg time to make one part (all time, completed parts only)</small></div>
-  <table>
-    <thead><tr>
-      <th>City</th><th>Machine</th><th>Today</th><th>Yesterday</th><th>Last 7d</th><th>This Month</th><th>Last Month</th><th>All Time</th><th>Avg TAT</th><th></th>
-    </tr></thead>
-    <tbody>
-      {% for r in cost_rows %}
-      <tr class="clickrow" onclick="location.href='/deep?city={{ r.city }}'">
-        <td><span class="cpill" style="background:{{ city_color[r.city] }}">{{ r.city }}</span></td>
-        <td><b>{{ r.machine }}</b></td>
-        <td class="mono">Rs {{ r.today }}</td>
-        <td class="mono">Rs {{ r.yday }}</td>
-        <td class="mono">Rs {{ r.week }}</td>
-        <td class="mono">Rs {{ r.month }}</td>
-        <td class="mono">Rs {{ r.lm }}</td>
-        <td class="mono" style="font-weight:700;color:#0f766e">Rs {{ r.alltime }}</td>
-        <td class="mono" style="font-weight:700;color:#7c3aed">{{ r.avg_tat }}</td>
-        <td class="arrow">view -&gt;</td>
-      </tr>
-      {% else %}
-      <tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="section-title">Top 5 Parts - All Cities, All Time</div>
+<div class="hint">Sabse zyada bane parts, sath me har ek ka apna avg cost &amp; avg turnaround time</div>
+<div class="rank-grid">
+  {% for r in top_parts_rows %}
+  <div class="rank-card">
+    <div class="rank-num">#{{ r.rank }}</div>
+    <div class="rank-part" title="{{ r.part }}">{{ r.part }}</div>
+    <div class="rank-stats">
+      <div><div class="rank-stat-label">Prints</div><div class="rank-stat-value">{{ r.prints }}</div></div>
+      <div><div class="rank-stat-label">Success</div><div class="rank-stat-value" style="color:#16a34a">{{ r.success }}</div></div>
+      <div><div class="rank-stat-label">Avg TAT</div><div class="rank-stat-value" style="color:#7c3aed">{{ r.avg_tat }}</div></div>
+      <div><div class="rank-stat-label">Avg Cost</div><div class="rank-stat-value" style="color:#0f766e">Rs {{ r.avg_cost }}</div></div>
+    </div>
+  </div>
+  {% else %}
+  <div style="text-align:center;color:#9ca3af;padding:24px;grid-column:1/-1">No data - click Sync Now</div>
+  {% endfor %}
 </div>
 {% endblock %}
