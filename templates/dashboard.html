@@ -2,6 +2,14 @@
 {% set active = 'dash' %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
+<style>
+  .clickrow{cursor:pointer;transition:background .12s}
+  .clickrow:hover{background:#fdf2f8}
+  .cpill{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff}
+  .arrow{color:#e91e63;font-weight:700;font-size:12px}
+  .hint{font-size:12px;color:#9ca3af;margin:2px 0 10px}
+</style>
+
 <div class="page-header">
   <div>
     <div class="page-title">Operations Dashboard</div>
@@ -13,16 +21,17 @@
 </div>
 
 <div class="section-title">Machine Hours - Avg per Active Day</div>
+<div class="hint">Kisi bhi row pe click karo -&gt; us city ki poori detail khul jayegi</div>
 <div class="table-card">
-  <div class="table-card-header">City / Machine - average machine-hours per active day<small>Active day = jis din us machine ne print kiya</small></div>
+  <div class="table-card-header">City / Machine - average machine-hours per active day<small>Active day = jis din machine ne print kiya</small></div>
   <table>
     <thead><tr>
-      <th>City</th><th>Machine</th><th>Today</th><th>Yesterday</th><th>Last 7d</th><th>This Month</th><th>Last Month</th><th>All Time</th>
+      <th>City</th><th>Machine</th><th>Today</th><th>Yesterday</th><th>Last 7d</th><th>This Month</th><th>Last Month</th><th>All Time</th><th></th>
     </tr></thead>
     <tbody>
       {% for r in hours_rows %}
-      <tr>
-        <td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff;background:{{ city_color[r.city] }}">{{ r.city }}</span></td>
+      <tr class="clickrow" onclick="location.href='/deep?city={{ r.city }}'">
+        <td><span class="cpill" style="background:{{ city_color[r.city] }}">{{ r.city }}</span></td>
         <td><b>{{ r.machine }}</b>{% if r.model %} <span style="color:#9ca3af;font-size:11px">{{ r.model }}</span>{% endif %}</td>
         <td class="mono">{{ r.today }}h</td>
         <td class="mono">{{ r.yday }}h</td>
@@ -30,6 +39,34 @@
         <td class="mono">{{ r.month }}h</td>
         <td class="mono">{{ r.lm }}h</td>
         <td class="mono" style="font-weight:700">{{ r.alltime }}h</td>
+        <td class="arrow">view -&gt;</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="section-title">Production and Success Rate</div>
+<div class="hint">Per City / Machine - all time</div>
+<div class="table-card">
+  <div class="table-card-header">Total parts, success, cancels &amp; success rate</div>
+  <table>
+    <thead><tr>
+      <th>City</th><th>Machine</th><th>Total Parts</th><th>Success</th><th>Cancelled</th><th>Success Rate</th><th>Avg Parts/Day</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in prod_rows %}
+      <tr class="clickrow" onclick="location.href='/deep?city={{ r.city }}'">
+        <td><span class="cpill" style="background:{{ city_color[r.city] }}">{{ r.city }}</span></td>
+        <td><b>{{ r.machine }}</b>{% if r.model %} <span style="color:#9ca3af;font-size:11px">{{ r.model }}</span>{% endif %}</td>
+        <td class="mono">{{ r.total }}</td>
+        <td class="mono" style="color:#16a34a;font-weight:700">{{ r.completed }}</td>
+        <td class="mono" style="color:#dc2626;font-weight:700">{{ r.cancelled }}</td>
+        <td class="mono"><b>{{ r.success_rate }}%</b></td>
+        <td class="mono">{{ r.avg_parts }}</td>
+        <td class="arrow">view -&gt;</td>
       </tr>
       {% else %}
       <tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
@@ -38,29 +75,26 @@
   </table>
 </div>
 
-<div class="section-title">Production and Success Rate - per City / Machine</div>
+<div class="section-title">Cost &amp; TAT (Turnaround Time)</div>
+<div class="hint">Per City / Machine - avg part cost &amp; avg print time (all time)</div>
 <div class="table-card">
-  <div class="table-card-header">Total parts, cancels, success rate + averages (per active day)<small>All-time</small></div>
+  <div class="table-card-header">Average part cost &amp; turnaround per machine</div>
   <table>
     <thead><tr>
-      <th>City</th><th>Machine</th><th>Total Parts</th><th>Success</th><th>Cancelled</th><th>Success Rate</th><th>Avg TAT</th><th>Avg Cost</th><th>Avg Parts/Day</th><th>Avg Hrs/Day</th>
+      <th>City</th><th>Machine</th><th>Avg TAT</th><th>Avg Cost</th><th>Avg Hrs/Day</th><th></th>
     </tr></thead>
     <tbody>
       {% for r in prod_rows %}
-      <tr>
-        <td><span style="display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;color:#fff;background:{{ city_color[r.city] }}">{{ r.city }}</span></td>
+      <tr class="clickrow" onclick="location.href='/deep?city={{ r.city }}'">
+        <td><span class="cpill" style="background:{{ city_color[r.city] }}">{{ r.city }}</span></td>
         <td><b>{{ r.machine }}</b>{% if r.model %} <span style="color:#9ca3af;font-size:11px">{{ r.model }}</span>{% endif %}</td>
-        <td class="mono">{{ r.total }}</td>
-        <td class="mono" style="color:#16a34a;font-weight:700">{{ r.completed }}</td>
-        <td class="mono" style="color:#dc2626;font-weight:700">{{ r.cancelled }}</td>
-        <td class="mono"><b>{{ r.success_rate }}%</b></td>
-        <td class="mono">{{ r.avg_tat }}</td>
-        <td class="mono">Rs {{ r.avg_cost }}</td>
-        <td class="mono">{{ r.avg_parts }}</td>
+        <td class="mono" style="font-weight:700;color:#7c3aed">{{ r.avg_tat }}</td>
+        <td class="mono" style="font-weight:700;color:#0f766e">Rs {{ r.avg_cost }}</td>
         <td class="mono">{{ r.avg_hours }}h</td>
+        <td class="arrow">view -&gt;</td>
       </tr>
       {% else %}
-      <tr><td colspan="10" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
+      <tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
       {% endfor %}
     </tbody>
   </table>
