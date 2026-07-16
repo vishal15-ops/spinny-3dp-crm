@@ -75,33 +75,37 @@
 </div>
 
 <div class="section-title">Production and Success Rate</div>
-<div class="hint">Per City / Machine - all time</div>
+<div class="hint">Per City / Machine - Total Parts by Today / Yesterday / Last 7d / This Month / Last Month / All Time</div>
 <div class="table-card">
   <div class="table-card-header">Total parts, success, cancels &amp; success rate</div>
   <table>
     <thead><tr>
-      <th>City</th><th>Machine</th><th>Total Parts</th><th>Success</th><th>Cancelled</th><th>Success Rate</th><th>Avg Parts/Day</th>
+      <th>City</th><th>Machine</th><th>Today</th><th>Yesterday</th><th>Last 7d</th><th>This Month</th><th>Last Month</th><th>All Time</th><th>Success</th><th>Cancelled</th><th>Success Rate</th>
     </tr></thead>
     <tbody>
       {% for r in prod_rows %}
       <tr class="clickrow" onclick="location.href='/deep?city={{ r.city }}'">
         <td><span class="cpill" style="background:{{ city_color[r.city] }}">{{ r.city }}</span></td>
         <td><b>{{ r.machine }}</b>{% if r.model %} <span style="color:#9ca3af;font-size:11px">{{ r.model }}</span>{% endif %}</td>
-        <td class="mono">{{ r.total }}</td>
+        <td class="mono">{{ r.today_n }}</td>
+        <td class="mono">{{ r.yday_n }}</td>
+        <td class="mono">{{ r.week_n }}</td>
+        <td class="mono">{{ r.month_n }}</td>
+        <td class="mono">{{ r.lm_n }}</td>
+        <td class="mono" style="font-weight:700">{{ r.total }}</td>
         <td class="mono" style="color:#16a34a;font-weight:700">{{ r.completed }}</td>
         <td class="mono" style="color:#dc2626;font-weight:700">{{ r.cancelled }}</td>
         <td class="mono"><b>{{ r.success_rate }}%</b></td>
-        <td class="mono">{{ r.avg_parts }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
+      <tr><td colspan="11" style="text-align:center;color:#9ca3af;padding:24px">No data - click Sync Now</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
 <div class="section-title">Top 5 Parts - All Cities, All Time</div>
-<div class="hint">Sabse zyada bane parts, sath me har ek ka apna avg cost &amp; avg turnaround time</div>
+<div class="hint">Most-made parts, each with its own avg cost &amp; avg turnaround time</div>
 <div class="rank-grid">
   {% for r in top_parts_rows %}
   <div class="rank-card">
