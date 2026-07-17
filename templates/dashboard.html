@@ -71,7 +71,7 @@
 <div class="section-title">Machine Hours - Avg per Active Day{% if period %} ({{ period_label }}){% endif %}</div>
 <div class="hint">Click any row -&gt; opens full detail for that city</div>
 <div class="table-card">
-  <div class="table-card-header">City / Machine - average machine-hours per active day<small>Active day = a day the machine actually printed</small></div>
+  <div class="table-card-header">City / Machine - average machine-hours per active day<small>Active day = counted by when the print started (not finished) - an overnight print that spills into early morning is not double-counted</small></div>
   <table>
     {% if period %}
     <thead><tr><th>City</th><th>Machine</th><th>{{ period_label }} (hrs)</th></tr></thead>
